@@ -143,7 +143,7 @@ func find_closest_enemy() -> Node2D:
 
 func move_entities_and_resolve_contacts() -> void:
 	for enemy in get_tree().get_nodes_in_group("enemies"):
-		if is_instance_valid(enemy) and enemy.global_position.x <= player.global_position.x + 24.0:
+		if is_instance_valid(enemy) and not enemy.already_defeated and enemy.global_position.x <= player.global_position.x + 24.0:
 			player.take_damage(enemy.contact_damage)
 			enemy.queue_free()
 	for essence in get_tree().get_nodes_in_group("runtime_entity"):

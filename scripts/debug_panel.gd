@@ -11,7 +11,7 @@ func setup(controller: Node) -> void:
 	build_interface()
 
 func build_interface() -> void:
-	custom_minimum_size = Vector2(230, 0)
+	custom_minimum_size = Vector2(250, 0)
 	var margin := MarginContainer.new()
 	margin.add_theme_constant_override("margin_left", 12)
 	margin.add_theme_constant_override("margin_right", 12)
@@ -30,9 +30,12 @@ func build_interface() -> void:
 	speed_label = Label.new()
 	column.add_child(speed_label)
 	pause_button = Button.new()
+	pause_button.custom_minimum_size = Vector2(220, 34)
 	pause_button.pressed.connect(main_controller.toggle_pause)
 	column.add_child(pause_button)
 	speed_button = Button.new()
+	speed_button.custom_minimum_size = Vector2(220, 34)
+	speed_button.text = "Velocidade: 1×"
 	speed_button.pressed.connect(main_controller.cycle_speed)
 	column.add_child(speed_button)
 	var spawn_button := Button.new()
@@ -53,7 +56,8 @@ func update_display(state: String, speed: float, is_paused: bool) -> void:
 	if not is_instance_valid(state_label):
 		return
 	state_label.text = "Estado: " + state
-	speed_label.text = "Velocidade: " + str(int(speed)) + "x"
+	speed_label.text = "Simulacao: " + str(int(speed)) + "×"
+	speed_button.text = "Velocidade: " + str(int(speed)) + "×"
 	pause_button.text = "Continuar" if is_paused else "Pausar"
 
 func _input(event: InputEvent) -> void:

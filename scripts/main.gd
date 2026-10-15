@@ -21,21 +21,24 @@ var health_bar: ProgressBar
 var health_label: Label
 var stats_label: Label
 var element_label: Label
+var cooldown_label: Label
 var bonus_label: Label
 var command_label: Label
 var defeat_overlay: PanelContainer
 var defeat_label: Label
 var debug_panel: PanelContainer
+var element_buttons: Array[Button] = []
 
 func _ready() -> void:
 	build_hud()
 	debug_panel = DEBUG_SCENE.instantiate()
 	add_child(debug_panel)
-	debug_panel.position = Vector2(700, 88)
+	debug_panel.position = Vector2(700, 250)
 	debug_panel.setup(self)
 	player.health_changed.connect(update_health)
 	player.died.connect(handle_defeat)
 	update_hud()
+	update_debug()
 	queue_redraw()
 
 func _process(delta: float) -> void:
@@ -63,9 +66,13 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not event is InputEventKey or not event.pressed or event.echo:
 		return
 	if event.keycode == KEY_1 and not game_over:
-		player.select_element("Fogo")
+		select_element("Fogo")
 	elif event.keycode == KEY_2 and not game_over:
-		player.select_element("Ar")
+		select_element("Agua")
+	elif event.keycode == KEY_3 and not game_over:
+		select_element("Terra")
+	elif event.keycode == KEY_4 and not game_over:
+		select_element("Ar")
 	elif event.keycode == KEY_E and not game_over:
 		collect_nearby_essence()
 	elif event.keycode == KEY_Q and not game_over:
@@ -86,6 +93,12 @@ func debug_spawn_enemy() -> void:
 	if not game_over:
 		spawn_enemy()
 
+func select_element(element: String) -> void:
+	if game_over:
+		return
+	player.select_element(element)
+	update_hud()
+
 func spawn_essence() -> void:
 	if game_over:
 		return
@@ -98,7 +111,7 @@ func automatic_attack() -> void:
 	if game_over or not player.is_attack_ready():
 		return
 	var target := find_closest_enemy()
-	if target == null or player.global_position.distance_to(target.global_position) > player.attack_range:
+	if target == null or player.global_position.distance_to(target.global_position) > player.get_attack_range():
 		return
 	var projectile := PROJECTILE_SCENE.instantiate()
 	projectile.global_position = player.global_position + Vector2(22, -32)
@@ -198,7 +211,7 @@ func build_hud() -> void:
 	add_child(canvas)
 	var top_bar := PanelContainer.new()
 	top_bar.position = Vector2(18, 16)
-	top_bar.size = Vector2(550, 112)
+	top_bar.size = Vector2(550, 145)
 	canvas.add_child(top_bar)
 	var column := VBoxContainer.new()
 	column.add_theme_constant_override("separation", 3)
@@ -215,29 +228,17 @@ func build_hud() -> void:
 	column.add_child(stats_label)
 	element_label = Label.new()
 	column.add_child(element_label)
+	cooldown_label = Label.new()
+	column.add_child(cooldown_label)
 	bonus_label = Label.new()
 	column.add_child(bonus_label)
 	command_label = Label.new()
 	command_label.add_theme_color_override("font_color", Color("#a7a39a"))
 	column.add_child(command_label)
-	var fire_button := Button.new()
-	fire_button.text = "1  Fogo"
-	fire_button.position = Vector2(590, 24)
-	fire_button.size = Vector2(105, 36)
-	fire_button.pressed.connect(func(): player.select_element("Fogo"); update_hud())
-	canvas.add_child(fire_button)
-	var air_button := Button.new()
-	air_button.text = "2  Ar"
-	air_button.position = Vector2(590, 66)
-	air_button.size = Vector2(105, 36)
-	air_button.pressed.connect(func(): player.select_element("Ar"); update_hud())
-	canvas.add_child(air_button)
-	var disabled_water := Button.new()
-	disabled_water.text = "Agua / Terra"
-	disabled_water.disabled = true
-	disabled_water.position = Vector2(590, 108)
-	disabled_water.size = Vector2(105, 32)
-	canvas.add_child(disabled_water)
+	element_buttons.append(create_element_button(canvas, "1  Fogo", "Fogo", Vector2(590, 24)))
+	element_buttons.append(create_element_button(canvas, "2  Agua", "Agua", Vector2(700, 24)))
+	element_buttons.append(create_element_button(canvas, "3  Terra", "Terra", Vector2(590, 66)))
+	element_buttons.append(create_element_button(canvas, "4  Ar", "Ar", Vector2(700, 66)))
 	defeat_overlay = PanelContainer.new()
 	defeat_overlay.position = Vector2(330, 205)
 	defeat_overlay.size = Vector2(300, 130)
@@ -254,6 +255,15 @@ func build_hud() -> void:
 	defeat_column.add_child(restart_button)
 	defeat_overlay.visible = false
 
+func create_element_button(canvas: CanvasLayer, label: String, element: String, button_position: Vector2) -> Button:
+	var button := Button.new()
+	button.text = label
+	button.position = button_position
+	button.size = Vector2(105, 36)
+	button.pressed.connect(select_element.bind(element))
+	canvas.add_child(button)
+	return button
+
 func update_health(current: int, maximum: int) -> void:
 	if is_instance_valid(health_bar):
 		health_bar.value = current
@@ -265,8 +275,13 @@ func update_hud() -> void:
 	update_health(player.health, player.max_health)
 	stats_label.text = "Inimigos derrotados: %d   Essencias: %d / 3" % [defeated_count, essence_count]
 	element_label.text = "Elemento ativo: %s" % player.selected_element
+	cooldown_label.text = "Recargas F %.1fs | A %.1fs | T %.1fs | Ar %.1fs" % [player.get_cooldown_remaining("Fogo"), player.get_cooldown_remaining("Agua"), player.get_cooldown_remaining("Terra"), player.get_cooldown_remaining("Ar")]
 	bonus_label.text = "Bonus de dano: ATIVO (%.1fs)" % bonus_timer if player.damage_bonus else "Bonus de dano: inativo"
-	command_label.text = "1/2 elemento   E coletar   Q consumir 3   F1 debug"
+	command_label.text = "1-4 elemento   E coletar   Q consumir 3   F1 debug"
+	var elements := ["Fogo", "Agua", "Terra", "Ar"]
+	var labels := ["1  Fogo", "2  Agua", "3  Terra", "4  Ar"]
+	for index in element_buttons.size():
+		element_buttons[index].text = ("* " if elements[index] == player.selected_element else "") + labels[index]
 
 func update_debug() -> void:
 	if is_instance_valid(debug_panel):

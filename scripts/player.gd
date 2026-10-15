@@ -5,15 +5,25 @@ signal died
 
 @export var max_health := 100
 @export var attack_range := 330.0
+@export var fire_range := 330.0
+@export var water_range := 310.0
+@export var earth_range := 290.0
+@export var air_range := 350.0
 @export var fire_damage := 28
 @export var fire_cooldown := 1.8
 @export var air_damage := 12
 @export var air_cooldown := 0.65
+@export var water_damage := 18
+@export var water_cooldown := 1.15
+@export var earth_damage := 34
+@export var earth_cooldown := 2.4
 
 var health := 100
 var selected_element := "Fogo"
 var fire_timer := 0.0
 var air_timer := 0.0
+var water_timer := 0.0
+var earth_timer := 0.0
 var damage_bonus := false
 
 func _ready() -> void:
@@ -23,24 +33,45 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	fire_timer = maxf(0.0, fire_timer - delta)
 	air_timer = maxf(0.0, air_timer - delta)
+	water_timer = maxf(0.0, water_timer - delta)
+	earth_timer = maxf(0.0, earth_timer - delta)
 
 func select_element(element: String) -> void:
-	if element == "Fogo" or element == "Ar":
+	if element == "Fogo" or element == "Agua" or element == "Terra" or element == "Ar":
 		selected_element = element
 		queue_redraw()
 
 func is_attack_ready() -> bool:
-	return fire_timer <= 0.0 if selected_element == "Fogo" else air_timer <= 0.0
+	return get_cooldown_remaining(selected_element) <= 0.0
 
 func get_attack_damage() -> int:
-	var damage := fire_damage if selected_element == "Fogo" else air_damage
+	var damage := fire_damage
+	match selected_element:
+		"Agua": damage = water_damage
+		"Terra": damage = earth_damage
+		"Ar": damage = air_damage
 	return damage * 2 if damage_bonus else damage
 
+func get_attack_range() -> float:
+	match selected_element:
+		"Agua": return water_range
+		"Terra": return earth_range
+		"Ar": return air_range
+	return fire_range
+
 func register_attack() -> void:
-	if selected_element == "Fogo":
-		fire_timer = fire_cooldown
-	else:
-		air_timer = air_cooldown
+	match selected_element:
+		"Fogo": fire_timer = fire_cooldown
+		"Agua": water_timer = water_cooldown
+		"Terra": earth_timer = earth_cooldown
+		"Ar": air_timer = air_cooldown
+
+func get_cooldown_remaining(element: String) -> float:
+	match element:
+		"Agua": return water_timer
+		"Terra": return earth_timer
+		"Ar": return air_timer
+	return fire_timer
 
 func take_damage(amount: int) -> void:
 	if health <= 0:
@@ -56,12 +87,18 @@ func reset() -> void:
 	selected_element = "Fogo"
 	fire_timer = 0.0
 	air_timer = 0.0
+	water_timer = 0.0
+	earth_timer = 0.0
 	damage_bonus = false
 	health_changed.emit(health, max_health)
 	queue_redraw()
 
 func _draw() -> void:
-	var color := Color("#e85d4a") if selected_element == "Fogo" else Color("#56b6d9")
+	var color := Color("#e85d4a")
+	match selected_element:
+		"Agua": color = Color("#3c9ed1")
+		"Terra": color = Color("#a8784b")
+		"Ar": color = Color("#9edbe8")
 	draw_rect(Rect2(-22, -48, 44, 48), color)
 	draw_rect(Rect2(-22, -48, 44, 48), Color("#f4f0e6"), false, 3.0)
 	draw_circle(Vector2(-9, -30), 4.0, Color("#f4f0e6"))

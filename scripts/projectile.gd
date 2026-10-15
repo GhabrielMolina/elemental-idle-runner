@@ -20,10 +20,14 @@ func _process(delta: float) -> void:
 	var direction := global_position.direction_to(target.global_position)
 	global_position += direction * speed * delta
 	if global_position.distance_to(target.global_position) < 18.0:
-		target.receive_damage(damage, push_distance)
+		target.receive_damage(damage, push_distance, element)
 		queue_free()
 
 func _draw() -> void:
-	var color := Color("#f04f3e") if element == "Fogo" else Color("#8ed8e8")
+	var color := Color("#f04f3e")
+	match element:
+		"Agua": color = Color("#47b9dc")
+		"Terra": color = Color("#b07a45")
+		"Ar": color = Color("#8ed8e8")
 	draw_circle(Vector2.ZERO, 8.0, color)
 	draw_circle(Vector2.ZERO, 8.0, Color("#fff3c4"), false, 2.0)

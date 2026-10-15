@@ -7,7 +7,11 @@ const DEBUG_SCENE := preload("res://scenes/DebugPanel.tscn")
 
 @onready var player: Node2D = $Player
 
+@export var min_spawn_interval: float = 1.8
+@export var max_spawn_interval: float = 2.6
+
 var enemy_timer := 0.0
+var spawn_rng: RandomNumberGenerator = RandomNumberGenerator.new()
 var essence_timer := 0.0
 var belt_offset := 0.0
 var bonus_timer := 0.0
@@ -30,6 +34,7 @@ var debug_panel: PanelContainer
 var element_buttons: Array[Button] = []
 
 func _ready() -> void:
+	spawn_rng.randomize()
 	build_hud()
 	debug_panel = DEBUG_SCENE.instantiate()
 	add_child(debug_panel)
@@ -53,7 +58,7 @@ func _process(delta: float) -> void:
 		update_hud()
 	if enemy_timer <= 0.0:
 		spawn_enemy()
-		enemy_timer = 2.2
+		enemy_timer = get_next_spawn_interval()
 	if essence_timer <= 0.0:
 		spawn_essence()
 		essence_timer = 6.0
@@ -88,6 +93,11 @@ func spawn_enemy() -> void:
 	enemy.add_to_group("runtime_entity")
 	enemy.add_to_group("enemies")
 	enemy.defeated.connect(_on_enemy_defeated)
+
+func get_next_spawn_interval() -> float:
+	var safe_minimum: float = maxf(min_spawn_interval, 0.01)
+	var safe_maximum: float = maxf(max_spawn_interval, safe_minimum)
+	return spawn_rng.randf_range(safe_minimum, safe_maximum)
 
 func debug_spawn_enemy() -> void:
 	if not game_over:
@@ -186,7 +196,7 @@ func restart_game() -> void:
 	defeated_count = 0
 	essence_count = 0
 	bonus_timer = 0.0
-	enemy_timer = 1.0
+	enemy_timer = get_next_spawn_interval()
 	essence_timer = 3.0
 	game_over = false
 	defeat_overlay.visible = false

@@ -1,6 +1,11 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/essence.gd" id="1_essence"]
+[ext_resource type="Texture2D" path="res://assets/items/essence.svg" id="2_essence_sprite"]
 
 [node name="Essence" type="Node2D"]
 script = ExtResource("1_essence")
+
+[node name="Sprite" type="Sprite2D" parent="."]
+texture = ExtResource("2_essence_sprite")
+scale = Vector2(0.65, 0.65)

@@ -275,7 +275,8 @@ func update_hud() -> void:
 	update_health(player.health, player.max_health)
 	stats_label.text = "Inimigos derrotados: %d   Essencias: %d / 3" % [defeated_count, essence_count]
 	element_label.text = "Elemento ativo: %s" % player.selected_element
-	cooldown_label.text = "Recargas F %.1fs | A %.1fs | T %.1fs | Ar %.1fs" % [player.get_cooldown_remaining("Fogo"), player.get_cooldown_remaining("Agua"), player.get_cooldown_remaining("Terra"), player.get_cooldown_remaining("Ar")]
+	var cooldown: float = player.get_cooldown_remaining(player.selected_element)
+	cooldown_label.text = "Recarga: Pronto" if cooldown <= 0.0 else "Recarga: %.1f s" % cooldown
 	bonus_label.text = "Bonus de dano: ATIVO (%.1fs)" % bonus_timer if player.damage_bonus else "Bonus de dano: inativo"
 	command_label.text = "1-4 elemento   E coletar   Q consumir 3   F1 debug"
 	var elements := ["Fogo", "Agua", "Terra", "Ar"]
@@ -289,9 +290,6 @@ func update_debug() -> void:
 		debug_panel.update_display(state, speeds[speed_index], get_tree().paused)
 
 func _draw() -> void:
-	draw_rect(Rect2(0, 0, 960, 540), Color("#182b35"))
-	draw_rect(Rect2(0, 410, 960, 130), Color("#294d4a"))
-	draw_rect(Rect2(0, 458, 960, 82), Color("#213d3c"))
 	for x in range(-80, 1040, 80):
 		var belt_x := x - belt_offset
 		draw_line(Vector2(belt_x, 458), Vector2(belt_x + 42, 500), Color("#53746b"), 5.0)

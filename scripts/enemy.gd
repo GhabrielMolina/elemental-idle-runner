@@ -42,13 +42,3 @@ func receive_damage(amount: int, push_distance := 0.0, effect := "") -> void:
 		defeated.emit()
 		queue_free()
 
-func _draw() -> void:
-	var color := Color("#8f4d78")
-	if stun_timer > 0.0:
-		color = Color("#d2a15d")
-	elif slow_timer > 0.0:
-		color = Color("#477fa1")
-	draw_rect(Rect2(-20, -42, 40, 42), color)
-	draw_rect(Rect2(-20, -42, 40, 42), Color("#f4f0e6"), false, 2.0)
-	draw_circle(Vector2(-8, -26), 4.0, Color("#f3c969"))
-	draw_circle(Vector2(8, -26), 4.0, Color("#f3c969"))

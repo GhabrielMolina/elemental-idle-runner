@@ -93,13 +93,3 @@ func reset() -> void:
 	health_changed.emit(health, max_health)
 	queue_redraw()
 
-func _draw() -> void:
-	var color := Color("#e85d4a")
-	match selected_element:
-		"Agua": color = Color("#3c9ed1")
-		"Terra": color = Color("#a8784b")
-		"Ar": color = Color("#9edbe8")
-	draw_rect(Rect2(-22, -48, 44, 48), color)
-	draw_rect(Rect2(-22, -48, 44, 48), Color("#f4f0e6"), false, 3.0)
-	draw_circle(Vector2(-9, -30), 4.0, Color("#f4f0e6"))
-	draw_circle(Vector2(9, -30), 4.0, Color("#f4f0e6"))

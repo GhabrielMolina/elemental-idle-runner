@@ -1,41 +1,46 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene format=3 uid="uid://cb6ehg8wu3mva"]
 
-[ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
+[ext_resource type="Script" uid="uid://ddqhnc3v1l5qw" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="PackedScene" path="res://scenes/Player.tscn" id="2_player"]
-[ext_resource type="Texture2D" path="res://assets/environment/background.svg" id="3_background"]
-[ext_resource type="Texture2D" path="res://assets/environment/ground_tile.svg" id="4_ground"]
+[ext_resource type="Texture2D" uid="uid://56q7mqlkxr6s" path="res://assets/environment/background.svg" id="3_background"]
+[ext_resource type="Texture2D" uid="uid://bo4xph7tqvnmc" path="res://assets/environment/ground_tile.svg" id="4_ground"]
 
-[node name="Main" type="Node2D"]
+[node name="Main" type="Node2D" unique_id=1819168186]
 script = ExtResource("1_main")
 
-[node name="Background" type="Sprite2D" parent="."]
+[node name="Background" type="Sprite2D" parent="." unique_id=1630167503]
 z_index = -2
 texture = ExtResource("3_background")
 centered = false
 
-[node name="GroundTile01" type="Sprite2D" parent="."]
+[node name="GroundTile01" type="Sprite2D" parent="." unique_id=1599296837]
 z_index = -1
-texture = ExtResource("4_ground")
 position = Vector2(80, 475)
-[node name="GroundTile02" type="Sprite2D" parent="."]
-z_index = -1
 texture = ExtResource("4_ground")
-position = Vector2(240, 475)
-[node name="GroundTile03" type="Sprite2D" parent="."]
-z_index = -1
-texture = ExtResource("4_ground")
-position = Vector2(400, 475)
-[node name="GroundTile04" type="Sprite2D" parent="."]
-z_index = -1
-texture = ExtResource("4_ground")
-position = Vector2(560, 475)
-[node name="GroundTile05" type="Sprite2D" parent="."]
-z_index = -1
-texture = ExtResource("4_ground")
-position = Vector2(720, 475)
-[node name="GroundTile06" type="Sprite2D" parent="."]
-z_index = -1
-texture = ExtResource("4_ground")
-position = Vector2(880, 475)
 
-[node name="Player" parent="." instance=ExtResource("2_player")]
+[node name="GroundTile02" type="Sprite2D" parent="." unique_id=181902822]
+z_index = -1
+position = Vector2(240, 475)
+texture = ExtResource("4_ground")
+
+[node name="GroundTile03" type="Sprite2D" parent="." unique_id=945084251]
+z_index = -1
+position = Vector2(400, 475)
+texture = ExtResource("4_ground")
+
+[node name="GroundTile04" type="Sprite2D" parent="." unique_id=356263321]
+z_index = -1
+position = Vector2(560, 475)
+texture = ExtResource("4_ground")
+
+[node name="GroundTile05" type="Sprite2D" parent="." unique_id=1522946469]
+z_index = -1
+position = Vector2(720, 475)
+texture = ExtResource("4_ground")
+
+[node name="GroundTile06" type="Sprite2D" parent="." unique_id=217349768]
+z_index = -1
+position = Vector2(880, 475)
+texture = ExtResource("4_ground")
+
+[node name="Player" parent="." unique_id=1435904820 instance=ExtResource("2_player")]

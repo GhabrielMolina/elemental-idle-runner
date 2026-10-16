@@ -5,9 +5,11 @@ signal defeated
 @export var max_health := 45
 @export var speed := 48.0
 @export var contact_damage := 12
+@export var element := "Fogo"
 
 var health := 45
 var already_defeated := false
+var counts_for_wave := false
 var base_speed := 48.0
 var slow_timer := 0.0
 var stun_timer := 0.0
@@ -20,6 +22,7 @@ func _ready() -> void:
 	health = max_health
 	base_speed = speed
 	base_sprite_scale = sprite.scale
+	apply_element_color()
 	queue_redraw()
 
 func _process(delta: float) -> void:
@@ -45,6 +48,14 @@ func receive_damage(amount: int, push_distance := 0.0, effect := "") -> void:
 	queue_redraw()
 	if health == 0:
 		die()
+
+func apply_element_color() -> void:
+	var color := Color("#ef654f")
+	match element:
+		"Agua": color = Color("#4bbbd8")
+		"Terra": color = Color("#b07a4b")
+		"Ar": color = Color("#a6dfe8")
+	sprite.self_modulate = color
 
 func play_damage_feedback() -> void:
 	if damage_tween and damage_tween.is_valid():

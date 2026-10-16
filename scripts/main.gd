@@ -9,6 +9,9 @@ const DEBUG_SCENE := preload("res://scenes/DebugPanel.tscn")
 
 @export var min_spawn_interval: float = 1.8
 @export var max_spawn_interval: float = 2.6
+@export var belt_speed: float = 56.0
+@export var wave_enemy_counts: Array[int] = [5, 7, 8, 10]
+@export var wave_element_options: Array[String] = ["Agua", "Agua,Terra", "Fogo", "Fogo,Ar"]
 
 var enemy_timer := 0.0
 var spawn_rng: RandomNumberGenerator = RandomNumberGenerator.new()
@@ -18,18 +21,27 @@ var bonus_timer := 0.0
 var defeated_count := 0
 var essence_count := 0
 var game_over := false
+var final_victory := false
+var awaiting_next_wave := false
+var current_wave := 0
+var wave_spawned_count := 0
+var wave_defeated_count := 0
 var speed_index := 0
 var speeds := [1.0, 2.0, 3.0]
 
 var health_bar: ProgressBar
 var health_label: Label
 var stats_label: Label
+var wave_label: Label
 var element_label: Label
 var cooldown_label: Label
 var bonus_label: Label
 var command_label: Label
 var defeat_overlay: PanelContainer
 var defeat_label: Label
+var overlay_message: Label
+var overlay_stats: Label
+var overlay_button: Button
 var debug_panel: PanelContainer
 var element_buttons: Array[Button] = []
 
@@ -42,41 +54,44 @@ func _ready() -> void:
 	debug_panel.setup(self)
 	player.health_changed.connect(update_health)
 	player.died.connect(handle_defeat)
+	start_wave(0)
 	update_hud()
 	update_debug()
 	queue_redraw()
 
 func _process(delta: float) -> void:
-	if game_over:
+	if game_over or final_victory or awaiting_next_wave:
 		return
-	belt_offset = fmod(belt_offset + 90.0 * delta, 80.0)
+	belt_offset = fmod(belt_offset + belt_speed * delta, 80.0)
 	enemy_timer -= delta
 	essence_timer -= delta
 	bonus_timer = maxf(0.0, bonus_timer - delta)
 	if bonus_timer == 0.0 and player.damage_bonus:
 		player.damage_bonus = false
 		update_hud()
-	if enemy_timer <= 0.0:
-		spawn_enemy()
+	if enemy_timer <= 0.0 and wave_spawned_count < get_current_wave_total():
+		spawn_enemy(choose_wave_element(), true)
+		wave_spawned_count += 1
 		enemy_timer = get_next_spawn_interval()
 	if essence_timer <= 0.0:
 		spawn_essence()
 		essence_timer = 6.0
 	move_entities_and_resolve_contacts()
 	automatic_attack()
+	check_wave_completion()
 	update_hud()
 	queue_redraw()
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not event is InputEventKey or not event.pressed or event.echo:
 		return
-	if event.keycode == KEY_1 and not game_over:
+	if event.keycode == KEY_1 and not game_over and not final_victory:
 		select_element("Fogo")
-	elif event.keycode == KEY_2 and not game_over:
+	elif event.keycode == KEY_2 and not game_over and not final_victory:
 		select_element("Agua")
-	elif event.keycode == KEY_3 and not game_over:
+	elif event.keycode == KEY_3 and not game_over and not final_victory:
 		select_element("Terra")
-	elif event.keycode == KEY_4 and not game_over:
+	elif event.keycode == KEY_4 and not game_over and not final_victory:
 		select_element("Ar")
 	elif event.keycode == KEY_E and not game_over:
 		collect_nearby_essence()
@@ -84,24 +99,102 @@ func _unhandled_input(event: InputEvent) -> void:
 		activate_bonus()
 	update_hud()
 
-func spawn_enemy() -> void:
-	if game_over:
+func spawn_enemy(enemy_element: String, is_wave_enemy: bool) -> void:
+	if game_over or final_victory:
 		return
 	var enemy := ENEMY_SCENE.instantiate()
 	enemy.position = Vector2(1000, 430)
+	enemy.element = enemy_element
+	enemy.counts_for_wave = is_wave_enemy
 	add_child(enemy)
 	enemy.add_to_group("runtime_entity")
 	enemy.add_to_group("enemies")
-	enemy.defeated.connect(_on_enemy_defeated)
+	enemy.add_to_group("wave_enemies" if is_wave_enemy else "debug_enemies")
+	enemy.defeated.connect(_on_enemy_defeated.bind(is_wave_enemy))
 
 func get_next_spawn_interval() -> float:
 	var safe_minimum: float = maxf(min_spawn_interval, 0.01)
 	var safe_maximum: float = maxf(max_spawn_interval, safe_minimum)
 	return spawn_rng.randf_range(safe_minimum, safe_maximum)
 
+func get_current_wave_total() -> int:
+	if current_wave < 0 or current_wave >= wave_enemy_counts.size():
+		return 0
+	return maxi(0, wave_enemy_counts[current_wave])
+
+func get_current_wave_elements() -> Array[String]:
+	var elements: Array[String] = []
+	if current_wave < 0 or current_wave >= wave_element_options.size():
+		return elements
+	for element_name in wave_element_options[current_wave].split(","):
+		var clean_name := element_name.strip_edges()
+		if clean_name != "":
+			elements.append(clean_name)
+	return elements
+
+func choose_wave_element() -> String:
+	var elements := get_current_wave_elements()
+	if elements.is_empty():
+		return "Fogo"
+	return elements[spawn_rng.randi_range(0, elements.size() - 1)]
+
+func start_wave(wave_index: int) -> void:
+	if wave_index < 0 or wave_index >= wave_enemy_counts.size():
+		return
+	current_wave = wave_index
+	wave_spawned_count = 0
+	wave_defeated_count = 0
+	enemy_timer = 0.0
+	awaiting_next_wave = false
+	final_victory = false
+	defeat_overlay.visible = false
+	update_hud()
+
+func has_active_enemies(group_name: String) -> bool:
+	for enemy in get_tree().get_nodes_in_group(group_name):
+		if is_instance_valid(enemy) and not enemy.already_defeated:
+			return true
+	return false
+
+func check_wave_completion() -> void:
+	if awaiting_next_wave or wave_spawned_count < get_current_wave_total():
+		return
+	if wave_defeated_count < get_current_wave_total():
+		return
+	if has_active_enemies("wave_enemies") or has_active_enemies("debug_enemies"):
+		return
+	if current_wave == wave_enemy_counts.size() - 1:
+		show_final_victory()
+	else:
+		show_wave_complete()
+
+func show_wave_complete() -> void:
+	awaiting_next_wave = true
+	defeat_overlay.visible = true
+	defeat_label.text = "Wave concluida!"
+	overlay_message.text = "A area foi superada."
+	overlay_stats.text = "Wave %d/4  |  Inimigos derrotados: %d" % [current_wave + 1, wave_defeated_count]
+	overlay_button.text = "Proxima wave"
+	update_hud()
+
+func show_final_victory() -> void:
+	final_victory = true
+	defeat_overlay.visible = true
+	defeat_label.text = "Vitoria!"
+	overlay_message.text = "Equilibrio restaurado nas quatro waves."
+	overlay_stats.text = "Total de inimigos derrotados: %d" % defeated_count
+	overlay_button.text = "Jogar novamente"
+	update_hud()
+
+func handle_overlay_action() -> void:
+	if awaiting_next_wave:
+		start_wave(current_wave + 1)
+	else:
+		restart_game()
+
 func debug_spawn_enemy() -> void:
-	if not game_over:
-		spawn_enemy()
+	if not game_over and not final_victory and not awaiting_next_wave:
+		spawn_enemy(choose_wave_element(), false)
 
 func select_element(element: String) -> void:
 	if game_over:
@@ -145,7 +238,7 @@ func move_entities_and_resolve_contacts() -> void:
 	for enemy in get_tree().get_nodes_in_group("enemies"):
 		if is_instance_valid(enemy) and not enemy.already_defeated and enemy.global_position.x <= player.global_position.x + 24.0:
 			player.take_damage(enemy.contact_damage)
-			enemy.queue_free()
+			enemy.die()
 	for essence in get_tree().get_nodes_in_group("runtime_entity"):
 		if not is_instance_valid(essence) or essence.is_in_group("enemies"):
 			continue
@@ -175,13 +268,21 @@ func activate_bonus() -> void:
 	bonus_timer = 5.0
 	update_hud()
 
-func _on_enemy_defeated() -> void:
+func _on_enemy_defeated(counts_for_wave: bool) -> void:
 	defeated_count += 1
+	if counts_for_wave:
+		wave_defeated_count += 1
+	check_wave_completion()
 	update_hud()
 
 func handle_defeat() -> void:
 	game_over = true
+	awaiting_next_wave = false
 	defeat_overlay.visible = true
+	defeat_label.text = "Game Over"
+	overlay_message.text = "O Avatar foi derrotado na wave %d." % (current_wave + 1)
+	overlay_stats.text = "Inimigos derrotados nesta wave: %d" % wave_defeated_count
+	overlay_button.text = "Tentar novamente"
 	update_hud()
 	update_debug()
 
@@ -196,10 +297,9 @@ func restart_game() -> void:
 	defeated_count = 0
 	essence_count = 0
 	bonus_timer = 0.0
-	enemy_timer = get_next_spawn_interval()
 	essence_timer = 3.0
 	game_over = false
-	defeat_overlay.visible = false
+	start_wave(0)
 	update_hud()
 	update_debug()
 	queue_redraw()
@@ -221,7 +321,7 @@ func build_hud() -> void:
 	add_child(canvas)
 	var top_bar := PanelContainer.new()
 	top_bar.position = Vector2(18, 16)
-	top_bar.size = Vector2(550, 145)
+	top_bar.size = Vector2(550, 175)
 	canvas.add_child(top_bar)
 	var column := VBoxContainer.new()
 	column.add_theme_constant_override("separation", 3)
@@ -234,6 +334,8 @@ func build_hud() -> void:
 	health_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	health_bar.show_percentage = false
 	column.add_child(health_bar)
+	wave_label = Label.new()
+	column.add_child(wave_label)
 	stats_label = Label.new()
 	column.add_child(stats_label)
 	element_label = Label.new()
@@ -250,19 +352,34 @@ func build_hud() -> void:
 	element_buttons.append(create_element_button(canvas, "3  Terra", "Terra", Vector2(590, 66)))
 	element_buttons.append(create_element_button(canvas, "4  Ar", "Ar", Vector2(700, 66)))
 	defeat_overlay = PanelContainer.new()
-	defeat_overlay.position = Vector2(330, 205)
-	defeat_overlay.size = Vector2(300, 130)
+	defeat_overlay.process_mode = Node.PROCESS_MODE_ALWAYS
+	defeat_overlay.position = Vector2(300, 175)
+	defeat_overlay.custom_minimum_size = Vector2(360, 190)
 	canvas.add_child(defeat_overlay)
+	var overlay_margin := MarginContainer.new()
+	overlay_margin.add_theme_constant_override("margin_left", 22)
+	overlay_margin.add_theme_constant_override("margin_right", 22)
+	overlay_margin.add_theme_constant_override("margin_top", 18)
+	overlay_margin.add_theme_constant_override("margin_bottom", 18)
+	defeat_overlay.add_child(overlay_margin)
 	var defeat_column := VBoxContainer.new()
-	defeat_overlay.add_child(defeat_column)
+	defeat_column.add_theme_constant_override("separation", 10)
+	overlay_margin.add_child(defeat_column)
 	defeat_label = Label.new()
-	defeat_label.text = "DERROTA\nO Avatar caiu."
+	defeat_label.text = "Game Over"
+	defeat_label.add_theme_font_size_override("font_size", 26)
 	defeat_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	defeat_column.add_child(defeat_label)
-	var restart_button := Button.new()
-	restart_button.text = "Reiniciar partida"
-	restart_button.pressed.connect(restart_game)
-	defeat_column.add_child(restart_button)
+	overlay_message = Label.new()
+	overlay_message.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	defeat_column.add_child(overlay_message)
+	overlay_stats = Label.new()
+	overlay_stats.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	defeat_column.add_child(overlay_stats)
+	overlay_button = Button.new()
+	overlay_button.custom_minimum_size = Vector2(0, 38)
+	overlay_button.pressed.connect(handle_overlay_action)
+	defeat_column.add_child(overlay_button)
 	defeat_overlay.visible = false
 
 func create_element_button(canvas: CanvasLayer, label: String, element: String, button_position: Vector2) -> Button:
@@ -283,6 +400,7 @@ func update_hud() -> void:
 	if not is_instance_valid(health_bar):
 		return
 	update_health(player.health, player.max_health)
+	wave_label.text = "Wave %d/4   Progresso: %d/%d" % [current_wave + 1, wave_defeated_count, get_current_wave_total()]
 	stats_label.text = "Inimigos derrotados: %d   Essencias: %d / 3" % [defeated_count, essence_count]
 	element_label.text = "Elemento ativo: %s" % player.selected_element
 	var cooldown: float = player.get_cooldown_remaining(player.selected_element)

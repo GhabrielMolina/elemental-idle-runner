@@ -12,6 +12,8 @@ const DEBUG_SCENE := preload("res://scenes/DebugPanel.tscn")
 @export var belt_speed: float = 56.0
 @export var wave_enemy_counts: Array[int] = [5, 7, 8, 10]
 @export var wave_element_options: Array[String] = ["Agua", "Agua,Terra", "Fogo", "Fogo,Ar"]
+@export var min_xp_per_kill := 13
+@export var max_xp_per_kill := 20
 
 var enemy_timer := 0.0
 var spawn_rng: RandomNumberGenerator = RandomNumberGenerator.new()
@@ -31,6 +33,10 @@ var speeds := [1.0, 2.0, 3.0]
 
 var health_bar: ProgressBar
 var health_label: Label
+var level_label: Label
+var xp_bar: ProgressBar
+var level_up_label: Label
+var level_up_tween: Tween
 var stats_label: Label
 var wave_label: Label
 var element_label: Label
@@ -50,10 +56,11 @@ func _ready() -> void:
 	build_hud()
 	debug_panel = DEBUG_SCENE.instantiate()
 	add_child(debug_panel)
-	debug_panel.position = Vector2(700, 250)
+	debug_panel.position = Vector2(700, 160)
 	debug_panel.setup(self)
 	player.health_changed.connect(update_health)
 	player.died.connect(handle_defeat)
+	player.leveled_up.connect(show_level_up_message)
 	start_wave(0)
 	update_hud()
 	update_debug()
@@ -110,7 +117,7 @@ func spawn_enemy(enemy_element: String, is_wave_enemy: bool) -> void:
 	enemy.add_to_group("runtime_entity")
 	enemy.add_to_group("enemies")
 	enemy.add_to_group("wave_enemies" if is_wave_enemy else "debug_enemies")
-	enemy.defeated.connect(_on_enemy_defeated.bind(is_wave_enemy))
+	enemy.defeated.connect(_on_enemy_defeated.bind(enemy, is_wave_enemy))
 
 func get_next_spawn_interval() -> float:
 	var safe_minimum: float = maxf(min_spawn_interval, 0.01)
@@ -182,7 +189,7 @@ func show_final_victory() -> void:
 	defeat_overlay.visible = true
 	defeat_label.text = "Vitoria!"
 	overlay_message.text = "Equilibrio restaurado nas quatro waves."
-	overlay_stats.text = "Total de inimigos derrotados: %d" % defeated_count
+	overlay_stats.text = "Total de inimigos derrotados: %d\n%s mantido para a proxima partida" % [defeated_count, get_level_text()]
 	overlay_button.text = "Jogar novamente"
 	update_hud()
 
@@ -195,6 +202,14 @@ func handle_overlay_action() -> void:
 func debug_spawn_enemy() -> void:
 	if not game_over and not final_victory and not awaiting_next_wave:
 		spawn_enemy(choose_wave_element(), false)
+
+func debug_add_xp() -> void:
+	player.add_xp(100)
+	update_hud()
+
+func debug_reset_progress() -> void:
+	player.reset_progress()
+	update_hud()
 
 func select_element(element: String) -> void:
 	if game_over:
@@ -209,6 +224,7 @@ func spawn_essence() -> void:
 	essence.position = Vector2(1000, 370)
 	add_child(essence)
 	essence.add_to_group("runtime_entity")
+	essence.add_to_group("essences")
 
 func automatic_attack() -> void:
 	if game_over or not player.is_attack_ready():
@@ -239,8 +255,8 @@ func move_entities_and_resolve_contacts() -> void:
 		if is_instance_valid(enemy) and not enemy.already_defeated and enemy.global_position.x <= player.global_position.x + 24.0:
 			player.take_damage(enemy.contact_damage)
 			enemy.die()
-	for essence in get_tree().get_nodes_in_group("runtime_entity"):
-		if not is_instance_valid(essence) or essence.is_in_group("enemies"):
+	for essence in get_tree().get_nodes_in_group("essences"):
+		if not is_instance_valid(essence):
 			continue
 		if essence.global_position.x < player.global_position.x - 40.0:
 			essence.queue_free()
@@ -248,8 +264,8 @@ func move_entities_and_resolve_contacts() -> void:
 func collect_nearby_essence() -> void:
 	var closest: Node2D
 	var closest_distance := 70.0
-	for essence in get_tree().get_nodes_in_group("runtime_entity"):
-		if not is_instance_valid(essence) or essence.is_in_group("enemies"):
+	for essence in get_tree().get_nodes_in_group("essences"):
+		if not is_instance_valid(essence):
 			continue
 		var distance := player.global_position.distance_to(essence.global_position)
 		if distance <= closest_distance:
@@ -268,11 +284,55 @@ func activate_bonus() -> void:
 	bonus_timer = 5.0
 	update_hud()
 
-func _on_enemy_defeated(counts_for_wave: bool) -> void:
+func _on_enemy_defeated(killed_by_attack: bool, enemy: Node2D, counts_for_wave: bool) -> void:
 	defeated_count += 1
 	if counts_for_wave:
 		wave_defeated_count += 1
+	if killed_by_attack:
+		grant_kill_xp(enemy.global_position)
 	check_wave_completion()
+	update_hud()
+
+func grant_kill_xp(at: Vector2) -> void:
+	if player.is_max_level():
+		return
+	var amount: int = player.add_xp(spawn_rng.randi_range(min_xp_per_kill, maxi(min_xp_per_kill, max_xp_per_kill)))
+	if amount > 0:
+		spawn_xp_popup(at, amount)
+
+func spawn_xp_popup(at: Vector2, amount: int) -> void:
+	var popup := Label.new()
+	popup.text = "+%d XP" % amount
+	popup.add_theme_color_override("font_color", Color("#f3c969"))
+	popup.add_theme_color_override("font_outline_color", Color("#162d42"))
+	popup.add_theme_constant_override("outline_size", 4)
+	popup.z_index = 10
+	popup.position = at + Vector2(-24, -110)
+	add_child(popup)
+	var tween := popup.create_tween()
+	tween.set_parallel()
+	tween.tween_property(popup, "position:y", popup.position.y - 40.0, 0.8)
+	tween.tween_property(popup, "modulate:a", 0.0, 0.8).set_ease(Tween.EASE_IN)
+	tween.set_parallel(false)
+	tween.tween_callback(popup.queue_free)
+
+func show_level_up_message(new_level: int, unlocked_element: String) -> void:
+	if unlocked_element != "":
+		var element_keys := {"Fogo": 1, "Agua": 2, "Terra": 3, "Ar": 4}
+		var unlocked_word := "liberado" if unlocked_element == "Ar" else "liberada"
+		level_up_label.text = "NIVEL %d! %s %s (tecla %d)" % [new_level, unlocked_element, unlocked_word, element_keys.get(unlocked_element, 0)]
+	elif new_level >= player.get_max_level():
+		level_up_label.text = "NIVEL MAX! +%d%% de dano" % roundi((player.max_level_damage_multiplier - 1.0) * 100.0)
+	else:
+		level_up_label.text = "NIVEL %d!" % new_level
+	if level_up_tween and level_up_tween.is_valid():
+		level_up_tween.kill()
+	level_up_label.visible = true
+	level_up_label.modulate.a = 1.0
+	level_up_tween = level_up_label.create_tween()
+	level_up_tween.tween_interval(2.0)
+	level_up_tween.tween_property(level_up_label, "modulate:a", 0.0, 0.5)
+	level_up_tween.tween_callback(level_up_label.hide)
 	update_hud()
 
 func handle_defeat() -> void:
@@ -281,7 +341,7 @@ func handle_defeat() -> void:
 	defeat_overlay.visible = true
 	defeat_label.text = "Game Over"
 	overlay_message.text = "O Avatar foi derrotado na wave %d." % (current_wave + 1)
-	overlay_stats.text = "Inimigos derrotados nesta wave: %d" % wave_defeated_count
+	overlay_stats.text = "Inimigos derrotados nesta wave: %d\n%s mantido para a proxima partida" % [wave_defeated_count, get_level_text()]
 	overlay_button.text = "Tentar novamente"
 	update_hud()
 	update_debug()
@@ -334,6 +394,15 @@ func build_hud() -> void:
 	health_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	health_bar.show_percentage = false
 	column.add_child(health_bar)
+	level_label = Label.new()
+	column.add_child(level_label)
+	xp_bar = ProgressBar.new()
+	xp_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	xp_bar.show_percentage = false
+	var xp_fill := StyleBoxFlat.new()
+	xp_fill.bg_color = Color("#f3c969")
+	xp_bar.add_theme_stylebox_override("fill", xp_fill)
+	column.add_child(xp_bar)
 	wave_label = Label.new()
 	column.add_child(wave_label)
 	stats_label = Label.new()
@@ -348,9 +417,17 @@ func build_hud() -> void:
 	command_label.add_theme_color_override("font_color", Color("#a7a39a"))
 	column.add_child(command_label)
 	element_buttons.append(create_element_button(canvas, "1  Fogo", "Fogo", Vector2(590, 24)))
-	element_buttons.append(create_element_button(canvas, "2  Agua", "Agua", Vector2(700, 24)))
+	element_buttons.append(create_element_button(canvas, "2  Agua", "Agua", Vector2(725, 24)))
 	element_buttons.append(create_element_button(canvas, "3  Terra", "Terra", Vector2(590, 66)))
-	element_buttons.append(create_element_button(canvas, "4  Ar", "Ar", Vector2(700, 66)))
+	element_buttons.append(create_element_button(canvas, "4  Ar", "Ar", Vector2(725, 66)))
+	level_up_label = Label.new()
+	level_up_label.position = Vector2(590, 112)
+	level_up_label.add_theme_font_size_override("font_size", 20)
+	level_up_label.add_theme_color_override("font_color", Color("#f3c969"))
+	level_up_label.add_theme_color_override("font_outline_color", Color("#162d42"))
+	level_up_label.add_theme_constant_override("outline_size", 5)
+	level_up_label.visible = false
+	canvas.add_child(level_up_label)
 	defeat_overlay = PanelContainer.new()
 	defeat_overlay.process_mode = Node.PROCESS_MODE_ALWAYS
 	defeat_overlay.position = Vector2(300, 175)
@@ -386,7 +463,7 @@ func create_element_button(canvas: CanvasLayer, label: String, element: String, 
 	var button := Button.new()
 	button.text = label
 	button.position = button_position
-	button.size = Vector2(105, 36)
+	button.size = Vector2(125, 36)
 	button.pressed.connect(select_element.bind(element))
 	canvas.add_child(button)
 	return button
@@ -400,6 +477,16 @@ func update_hud() -> void:
 	if not is_instance_valid(health_bar):
 		return
 	update_health(player.health, player.max_health)
+	if player.is_max_level():
+		level_label.text = "Nivel MAX   +%d%% de dano" % roundi((player.max_level_damage_multiplier - 1.0) * 100.0)
+		xp_bar.min_value = 0
+		xp_bar.max_value = 1
+		xp_bar.value = 1
+	else:
+		level_label.text = "%s   XP %d / %d" % [get_level_text(), player.xp, player.get_next_level_xp()]
+		xp_bar.min_value = player.get_level_start_xp()
+		xp_bar.max_value = player.get_next_level_xp()
+		xp_bar.value = player.xp
 	wave_label.text = "Wave %d/4   Progresso: %d/%d" % [current_wave + 1, wave_defeated_count, get_current_wave_total()]
 	stats_label.text = "Inimigos derrotados: %d   Essencias: %d / 3" % [defeated_count, essence_count]
 	element_label.text = "Elemento ativo: %s" % player.selected_element
@@ -410,7 +497,13 @@ func update_hud() -> void:
 	var elements := ["Fogo", "Agua", "Terra", "Ar"]
 	var labels := ["1  Fogo", "2  Agua", "3  Terra", "4  Ar"]
 	for index in element_buttons.size():
-		element_buttons[index].text = ("* " if elements[index] == player.selected_element else "") + labels[index]
+		var unlocked: bool = player.is_element_unlocked(elements[index])
+		var lock_text := "" if unlocked else " (Nv%d)" % player.get_element_unlock_level(elements[index])
+		element_buttons[index].text = ("* " if elements[index] == player.selected_element else "") + labels[index] + lock_text
+		element_buttons[index].disabled = not unlocked
+
+func get_level_text() -> String:
+	return "Nivel MAX" if player.is_max_level() else "Nivel %d" % player.level
 
 func update_debug() -> void:
 	if is_instance_valid(debug_panel):

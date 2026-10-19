@@ -42,6 +42,14 @@ func build_interface() -> void:
 	spawn_button.text = "Gerar inimigo"
 	spawn_button.pressed.connect(main_controller.debug_spawn_enemy)
 	column.add_child(spawn_button)
+	var add_xp_button := Button.new()
+	add_xp_button.text = "+100 XP"
+	add_xp_button.pressed.connect(main_controller.debug_add_xp)
+	column.add_child(add_xp_button)
+	var reset_progress_button := Button.new()
+	reset_progress_button.text = "Zerar progresso"
+	reset_progress_button.pressed.connect(main_controller.debug_reset_progress)
+	column.add_child(reset_progress_button)
 	var reset_button := Button.new()
 	reset_button.text = "Reiniciar partida"
 	reset_button.pressed.connect(main_controller.restart_game)

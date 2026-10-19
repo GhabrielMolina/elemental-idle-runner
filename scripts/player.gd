@@ -2,6 +2,8 @@ extends Node2D
 
 signal health_changed(current: int, maximum: int)
 signal died
+signal xp_changed(xp: int, level: int)
+signal leveled_up(level: int, unlocked_element: String)
 
 @export var max_health := 100
 @export var attack_range := 330.0
@@ -17,8 +19,13 @@ signal died
 @export var water_cooldown := 1.15
 @export var earth_damage := 34
 @export var earth_cooldown := 2.4
+@export var level_xp_thresholds: Array[int] = [100, 200, 300, 400]
+@export var element_unlock_levels: Dictionary[String, int] = {"Fogo": 1, "Agua": 2, "Terra": 3, "Ar": 4}
+@export var max_level_damage_multiplier := 1.25
 
 var health := 100
+var xp := 0
+var level := 1
 var selected_element := "Fogo"
 var fire_timer := 0.0
 var air_timer := 0.0
@@ -43,8 +50,52 @@ func _process(delta: float) -> void:
 
 func select_element(element: String) -> void:
 	if element == "Fogo" or element == "Agua" or element == "Terra" or element == "Ar":
+		if not is_element_unlocked(element):
+			return
 		selected_element = element
 		queue_redraw()
+
+func get_max_level() -> int:
+	return level_xp_thresholds.size() + 1
+
+func is_max_level() -> bool:
+	return level >= get_max_level()
+
+func get_level_start_xp() -> int:
+	return 0 if level <= 1 else level_xp_thresholds[level - 2]
+
+func get_next_level_xp() -> int:
+	return get_level_start_xp() if is_max_level() else level_xp_thresholds[level - 1]
+
+func get_element_unlock_level(element: String) -> int:
+	return element_unlock_levels.get(element, 1)
+
+func is_element_unlocked(element: String) -> bool:
+	return level >= get_element_unlock_level(element)
+
+func get_element_unlocked_at(target_level: int) -> String:
+	for element in element_unlock_levels:
+		if element_unlock_levels[element] == target_level:
+			return element
+	return ""
+
+func add_xp(amount: int) -> int:
+	if is_max_level() or amount <= 0:
+		return 0
+	xp += amount
+	while not is_max_level() and xp >= get_next_level_xp():
+		level += 1
+		leveled_up.emit(level, get_element_unlocked_at(level))
+	xp_changed.emit(xp, level)
+	return amount
+
+func reset_progress() -> void:
+	xp = 0
+	level = 1
+	if not is_element_unlocked(selected_element):
+		selected_element = "Fogo"
+	xp_changed.emit(xp, level)
+	queue_redraw()
 
 func is_attack_ready() -> bool:
 	return get_cooldown_remaining(selected_element) <= 0.0
@@ -55,6 +106,8 @@ func get_attack_damage() -> int:
 		"Agua": damage = water_damage
 		"Terra": damage = earth_damage
 		"Ar": damage = air_damage
+	if is_max_level():
+		damage = roundi(damage * max_level_damage_multiplier)
 	return damage * 2 if damage_bonus else damage
 
 func get_attack_range() -> float:

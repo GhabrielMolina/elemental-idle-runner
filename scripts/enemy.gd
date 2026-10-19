@@ -1,6 +1,6 @@
 extends Node2D
 
-signal defeated
+signal defeated(killed_by_attack: bool)
 
 @export var max_health := 45
 @export var speed := 48.0
@@ -47,7 +47,7 @@ func receive_damage(amount: int, push_distance := 0.0, effect := "") -> void:
 		stun_timer = 1.0
 	queue_redraw()
 	if health == 0:
-		die()
+		die(true)
 
 func apply_element_color() -> void:
 	var color := Color("#ef654f")
@@ -69,14 +69,14 @@ func play_damage_feedback() -> void:
 	damage_tween.tween_property(sprite, "scale", base_sprite_scale, 0.1)
 	damage_tween.parallel().tween_property(sprite, "modulate", Color.WHITE, 0.12)
 
-func die() -> void:
+func die(killed_by_attack := false) -> void:
 	if already_defeated:
 		return
 	already_defeated = true
 	set_process(false)
 	if damage_tween and damage_tween.is_valid():
 		damage_tween.kill()
-	defeated.emit()
+	defeated.emit(killed_by_attack)
 	death_tween = create_tween()
 	death_tween.set_parallel()
 	death_tween.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)

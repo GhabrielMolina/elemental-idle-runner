@@ -1,0 +1,19 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Rodar jogo (Main.tscn)",
+            "type": "godot",
+            "request": "launch",
+            "project": "${workspaceFolder}",
+            "scene": "main"
+        },
+        {
+            "name": "Rodar cena atual",
+            "type": "godot",
+            "request": "launch",
+            "project": "${workspaceFolder}",
+            "scene": "current"
+        }
+    ]
+}

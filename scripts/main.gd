@@ -4,6 +4,10 @@ const ENEMY_SCENE := preload("res://scenes/Enemy.tscn")
 const PROJECTILE_SCENE := preload("res://scenes/Projectile.tscn")
 const ESSENCE_SCENE := preload("res://scenes/Essence.tscn")
 const DEBUG_SCENE := preload("res://scenes/DebugPanel.tscn")
+const SHOP_SCENE := preload("res://scenes/ShopPanel.tscn")
+const TORNADO_SCENE := preload("res://scenes/Tornado.tscn")
+const MUD_PATCH_SCENE := preload("res://scenes/MudPatch.tscn")
+const AREA_EFFECT := preload("res://scripts/area_effect.gd")
 
 @onready var player: Node2D = $Player
 
@@ -30,6 +34,7 @@ var wave_spawned_count := 0
 var wave_defeated_count := 0
 var speed_index := 0
 var speeds := [1.0, 2.0, 3.0]
+var air_attack_counter := 0
 
 var health_bar: ProgressBar
 var health_label: Label
@@ -37,6 +42,7 @@ var level_label: Label
 var xp_bar: ProgressBar
 var level_up_label: Label
 var level_up_tween: Tween
+var element_xp_label: Label
 var stats_label: Label
 var wave_label: Label
 var element_label: Label
@@ -49,6 +55,8 @@ var overlay_message: Label
 var overlay_stats: Label
 var overlay_button: Button
 var debug_panel: PanelContainer
+var shop_panel: PanelContainer
+var hud_layer: CanvasLayer
 var element_buttons: Array[Button] = []
 
 func _ready() -> void:
@@ -58,6 +66,9 @@ func _ready() -> void:
 	add_child(debug_panel)
 	debug_panel.position = Vector2(700, 160)
 	debug_panel.setup(self)
+	shop_panel = SHOP_SCENE.instantiate()
+	hud_layer.add_child(shop_panel)
+	shop_panel.setup(self, player)
 	player.health_changed.connect(update_health)
 	player.died.connect(handle_defeat)
 	player.leveled_up.connect(show_level_up_message)
@@ -113,6 +124,7 @@ func spawn_enemy(enemy_element: String, is_wave_enemy: bool) -> void:
 	enemy.position = Vector2(1000, 430)
 	enemy.element = enemy_element
 	enemy.counts_for_wave = is_wave_enemy
+	enemy.damage_modifier = player.get_damage_taken_multiplier
 	add_child(enemy)
 	enemy.add_to_group("runtime_entity")
 	enemy.add_to_group("enemies")
@@ -207,8 +219,14 @@ func debug_add_xp() -> void:
 	player.add_xp(100)
 	update_hud()
 
+func debug_add_element_xp() -> void:
+	for element in ["Fogo", "Agua", "Terra", "Ar"]:
+		player.add_element_xp(element, 100)
+	update_hud()
+
 func debug_reset_progress() -> void:
 	player.reset_progress()
+	air_attack_counter = 0
 	update_hud()
 
 func select_element(element: String) -> void:
@@ -229,26 +247,150 @@ func spawn_essence() -> void:
 func automatic_attack() -> void:
 	if game_over or not player.is_attack_ready():
 		return
-	var target := find_closest_enemy()
-	if target == null or player.global_position.distance_to(target.global_position) > player.get_attack_range():
+	var targets := get_enemies_near(player.global_position, player.get_attack_range())
+	if targets.is_empty():
 		return
-	var projectile := PROJECTILE_SCENE.instantiate()
-	projectile.global_position = player.global_position + Vector2(22, -32)
-	projectile.setup(target, player.get_attack_damage(), player.selected_element)
-	add_child(projectile)
-	projectile.add_to_group("runtime_entity")
+	var element: String = player.selected_element
+	var damage: int = player.get_attack_damage()
+	var count: int = player.get_projectile_count()
+	var bounces := roundi(player.get_upgrade_number("ar_ricochete", "bounces")) if element == "Ar" else 0
+	for index in count:
+		var offset := Vector2(22, -32 + (index - (count - 1) / 2.0) * 12.0)
+		spawn_projectile(player.global_position + offset, targets[index % targets.size()], damage, element, true, bounces)
+	if element == "Ar":
+		try_launch_tornado(damage)
 	player.register_attack()
 
-func find_closest_enemy() -> Node2D:
-	var closest: Node2D
-	var closest_distance := INF
+func spawn_projectile(from: Vector2, target: Node2D, damage: int, element: String, is_primary: bool, bounces_left := 0, chain_hit_ids: Array[int] = []) -> void:
+	var projectile := PROJECTILE_SCENE.instantiate()
+	projectile.global_position = from
+	projectile.setup(target, damage, element, is_primary)
+	projectile.bounces_left = bounces_left
+	projectile.chain_hit_ids = chain_hit_ids
+	projectile.impacted.connect(_on_projectile_impacted)
+	add_child(projectile)
+	projectile.add_to_group("runtime_entity")
+
+# Inimigos vivos ate o raio informado, do mais proximo ao mais distante.
+func get_enemies_near(origin: Vector2, radius: float, exclude_ids: Array[int] = []) -> Array[Node2D]:
+	var found: Array[Node2D] = []
 	for enemy in get_tree().get_nodes_in_group("enemies"):
-		if is_instance_valid(enemy):
-			var distance := player.global_position.distance_to(enemy.global_position)
-			if distance < closest_distance:
-				closest = enemy
-				closest_distance = distance
-	return closest
+		if not is_instance_valid(enemy) or enemy.already_defeated or exclude_ids.has(enemy.get_instance_id()):
+			continue
+		if origin.distance_to(enemy.global_position) <= radius:
+			found.append(enemy)
+	found.sort_custom(func(a: Node2D, b: Node2D) -> bool: return origin.distance_to(a.global_position) < origin.distance_to(b.global_position))
+	return found
+
+func _on_projectile_impacted(projectile: Node2D) -> void:
+	var target: Node2D = projectile.target
+	var impact_position := target.global_position
+	if projectile.is_primary:
+		trigger_primary_effects(target, projectile.damage, projectile.element, impact_position)
+	apply_hit(target, projectile.damage, projectile.element)
+	if projectile.bounces_left > 0:
+		bounce_projectile(projectile, target, impact_position)
+
+# Todo dano passa por aqui: aplica o dano e depois os efeitos de status do elemento.
+# Por isso explosao, onda, tremor, ricochete e tufao tambem queimam, afogam, deixam lento etc.
+func apply_hit(enemy: Node2D, damage: int, element: String) -> void:
+	if not is_instance_valid(enemy) or enemy.already_defeated:
+		return
+	var was_slowed: bool = enemy.is_slowed()
+	var push_distance: float = player.air_push_distance if element == "Ar" else 0.0
+	enemy.receive_damage(damage, element, push_distance)
+	if enemy.already_defeated:
+		return
+	match element:
+		"Fogo":
+			if player.get_upgrade_level("fogo_queimadura") > 0:
+				enemy.apply_burn(roundi(player.get_upgrade_number("fogo_queimadura", "tick_damage")), player.get_upgrade_number("fogo_queimadura", "duration"))
+		"Agua":
+			if player.get_upgrade_level("agua_afogamento") > 0:
+				enemy.apply_drown(roundi(player.get_upgrade_number("agua_afogamento", "tick_damage")), player.get_upgrade_number("agua_afogamento", "duration"), player.get_upgrade_percent("agua_afogamento", "execute_pct"))
+			if was_slowed and player.get_upgrade_level("agua_congelamento") > 0:
+				enemy.apply_stun(player.get_upgrade_number("agua_congelamento", "duration"), true)
+			enemy.apply_slow(player.water_slow_factor, player.water_slow_duration)
+		"Terra":
+			enemy.apply_stun(player.earth_stun_duration)
+
+# Efeitos disparados so pelo impacto principal de um projetil (evita reacao em cadeia).
+func trigger_primary_effects(target: Node2D, damage: int, element: String, at: Vector2) -> void:
+	var target_ids: Array[int] = [target.get_instance_id()]
+	match element:
+		"Fogo":
+			var radius: float = player.get_upgrade_number("fogo_explosao", "radius")
+			if radius > 0.0:
+				var splash_damage := roundi(damage * player.get_upgrade_percent("fogo_explosao", "damage_pct"))
+				for enemy in get_enemies_near(at, radius, target_ids):
+					apply_hit(enemy, splash_damage, "Fogo")
+				spawn_area_effect(at, radius, Color("#ff8a3d"))
+		"Agua":
+			var length: float = player.get_upgrade_number("agua_onda", "length")
+			if length > 0.0:
+				var wave_damage := roundi(damage * player.get_upgrade_percent("agua_onda", "damage_pct"))
+				for enemy in get_enemies_near(at, length, target_ids):
+					if enemy.global_position.x >= at.x:
+						apply_hit(enemy, wave_damage, "Agua")
+				spawn_area_effect(at + Vector2(length / 2.0, 0), length / 2.0, Color("#4bbbd8"))
+		"Terra":
+			if player.get_upgrade_level("terra_lamacal") > 0:
+				spawn_mud_patch(at)
+			var radius: float = player.get_upgrade_number("terra_tremor", "radius")
+			if radius > 0.0:
+				var tremor_damage := roundi(damage * player.get_upgrade_percent("terra_tremor", "damage_pct"))
+				for enemy in get_enemies_near(at, radius, target_ids):
+					apply_hit(enemy, tremor_damage, "Terra")
+				spawn_area_effect(at, radius, Color("#c8925f"))
+		"Ar":
+			var radius: float = player.get_upgrade_number("ar_ventania", "radius")
+			if radius > 0.0 and target.has_spreadable_status():
+				for enemy in get_enemies_near(at, radius, target_ids):
+					target.copy_statuses_to(enemy)
+				spawn_area_effect(at, radius, Color("#e8f4f8"))
+
+func bounce_projectile(projectile: Node2D, target: Node2D, at: Vector2) -> void:
+	var hit_ids: Array[int] = projectile.chain_hit_ids.duplicate()
+	hit_ids.append(target.get_instance_id())
+	var candidates := get_enemies_near(at, player.get_upgrade_number("ar_ricochete", "radius"), hit_ids)
+	if candidates.is_empty():
+		return
+	var bounce_damage: int = projectile.damage
+	if projectile.is_primary:
+		bounce_damage = maxi(1, roundi(projectile.damage * player.get_upgrade_percent("ar_ricochete", "damage_pct")))
+	spawn_projectile(projectile.global_position, candidates[0], bounce_damage, projectile.element, false, projectile.bounces_left - 1, hit_ids)
+
+func try_launch_tornado(damage: int) -> void:
+	var every := roundi(player.get_upgrade_number("ar_tufao", "every"))
+	if every <= 0:
+		return
+	air_attack_counter += 1
+	if air_attack_counter < every:
+		return
+	air_attack_counter = 0
+	var tornado := TORNADO_SCENE.instantiate()
+	tornado.position = player.position + Vector2(30, 0)
+	tornado.setup(roundi(damage * player.get_upgrade_percent("ar_tufao", "damage_pct")), player.position.x + player.get_attack_range() + 80.0)
+	tornado.hit_enemy.connect(_on_tornado_hit)
+	add_child(tornado)
+	tornado.add_to_group("runtime_entity")
+
+func _on_tornado_hit(enemy: Node2D, damage: int) -> void:
+	apply_hit(enemy, damage, "Ar")
+
+func spawn_mud_patch(at: Vector2) -> void:
+	var mud := MUD_PATCH_SCENE.instantiate()
+	mud.position = Vector2(at.x, player.position.y + 2.0)
+	mud.setup(player.get_upgrade_number("terra_lamacal", "duration"), player.get_upgrade_number("terra_lamacal", "radius"), player.get_upgrade_percent("terra_lamacal", "speed_pct"))
+	add_child(mud)
+	mud.add_to_group("runtime_entity")
+
+func spawn_area_effect(at: Vector2, radius: float, color: Color) -> void:
+	var effect: Node2D = AREA_EFFECT.new()
+	effect.position = at + Vector2(0, -36)
+	effect.setup(radius, color)
+	add_child(effect)
+	effect.add_to_group("runtime_entity")
 
 func move_entities_and_resolve_contacts() -> void:
 	for enemy in get_tree().get_nodes_in_group("enemies"):
@@ -284,26 +426,26 @@ func activate_bonus() -> void:
 	bonus_timer = 5.0
 	update_hud()
 
-func _on_enemy_defeated(killed_by_attack: bool, enemy: Node2D, counts_for_wave: bool) -> void:
+func _on_enemy_defeated(killed_by_attack: bool, killer_element: String, enemy: Node2D, counts_for_wave: bool) -> void:
 	defeated_count += 1
 	if counts_for_wave:
 		wave_defeated_count += 1
 	if killed_by_attack:
-		grant_kill_xp(enemy.global_position)
+		grant_kill_xp(enemy.global_position, killer_element)
 	check_wave_completion()
 	update_hud()
 
-func grant_kill_xp(at: Vector2) -> void:
-	if player.is_max_level():
-		return
-	var amount: int = player.add_xp(spawn_rng.randi_range(min_xp_per_kill, maxi(min_xp_per_kill, max_xp_per_kill)))
-	if amount > 0:
-		spawn_xp_popup(at, amount)
+# O mesmo valor sorteado vai para o XP geral (ate o nivel MAX) e para o XP do elemento do golpe final.
+func grant_kill_xp(at: Vector2, element: String) -> void:
+	var amount := spawn_rng.randi_range(min_xp_per_kill, maxi(min_xp_per_kill, max_xp_per_kill))
+	player.add_xp(amount)
+	player.add_element_xp(element, amount)
+	spawn_xp_popup(at, amount, element)
 
-func spawn_xp_popup(at: Vector2, amount: int) -> void:
+func spawn_xp_popup(at: Vector2, amount: int, element: String) -> void:
 	var popup := Label.new()
-	popup.text = "+%d XP" % amount
-	popup.add_theme_color_override("font_color", Color("#f3c969"))
+	popup.text = "+%d XP %s" % [amount, element] if element != "" else "+%d XP" % amount
+	popup.add_theme_color_override("font_color", get_element_color(element))
 	popup.add_theme_color_override("font_outline_color", Color("#162d42"))
 	popup.add_theme_constant_override("outline_size", 4)
 	popup.z_index = 10
@@ -347,6 +489,7 @@ func handle_defeat() -> void:
 	update_debug()
 
 func restart_game() -> void:
+	shop_panel.close()
 	get_tree().paused = false
 	Engine.time_scale = 1.0
 	speed_index = 0
@@ -358,6 +501,7 @@ func restart_game() -> void:
 	essence_count = 0
 	bonus_timer = 0.0
 	essence_timer = 3.0
+	air_attack_counter = 0
 	game_over = false
 	start_wave(0)
 	update_hud()
@@ -365,7 +509,7 @@ func restart_game() -> void:
 	queue_redraw()
 
 func toggle_pause() -> void:
-	if game_over:
+	if game_over or shop_panel.visible:
 		return
 	get_tree().paused = not get_tree().paused
 	update_debug()
@@ -379,6 +523,7 @@ func build_hud() -> void:
 	var canvas := CanvasLayer.new()
 	canvas.name = "HUD"
 	add_child(canvas)
+	hud_layer = canvas
 	var top_bar := PanelContainer.new()
 	top_bar.position = Vector2(18, 16)
 	top_bar.size = Vector2(550, 175)
@@ -403,6 +548,8 @@ func build_hud() -> void:
 	xp_fill.bg_color = Color("#f3c969")
 	xp_bar.add_theme_stylebox_override("fill", xp_fill)
 	column.add_child(xp_bar)
+	element_xp_label = Label.new()
+	column.add_child(element_xp_label)
 	wave_label = Label.new()
 	column.add_child(wave_label)
 	stats_label = Label.new()
@@ -487,13 +634,14 @@ func update_hud() -> void:
 		xp_bar.min_value = player.get_level_start_xp()
 		xp_bar.max_value = player.get_next_level_xp()
 		xp_bar.value = player.xp
+	element_xp_label.text = "XP elemental   Fogo %d   Agua %d   Terra %d   Ar %d" % [player.get_element_xp("Fogo"), player.get_element_xp("Agua"), player.get_element_xp("Terra"), player.get_element_xp("Ar")]
 	wave_label.text = "Wave %d/4   Progresso: %d/%d" % [current_wave + 1, wave_defeated_count, get_current_wave_total()]
 	stats_label.text = "Inimigos derrotados: %d   Essencias: %d / 3" % [defeated_count, essence_count]
 	element_label.text = "Elemento ativo: %s" % player.selected_element
 	var cooldown: float = player.get_cooldown_remaining(player.selected_element)
 	cooldown_label.text = "Recarga: Pronto" if cooldown <= 0.0 else "Recarga: %.1f s" % cooldown
 	bonus_label.text = "Bonus de dano: ATIVO (%.1fs)" % bonus_timer if player.damage_bonus else "Bonus de dano: inativo"
-	command_label.text = "1-4 elemento   E coletar   Q consumir 3   F1 debug"
+	command_label.text = "1-4 elemento   E coletar   Q consumir 3   P loja   F1 debug"
 	var elements := ["Fogo", "Agua", "Terra", "Ar"]
 	var labels := ["1  Fogo", "2  Agua", "3  Terra", "4  Ar"]
 	for index in element_buttons.size():
@@ -501,6 +649,16 @@ func update_hud() -> void:
 		var lock_text := "" if unlocked else " (Nv%d)" % player.get_element_unlock_level(elements[index])
 		element_buttons[index].text = ("* " if elements[index] == player.selected_element else "") + labels[index] + lock_text
 		element_buttons[index].disabled = not unlocked
+	if is_instance_valid(shop_panel) and shop_panel.visible:
+		shop_panel.refresh()
+
+func get_element_color(element: String) -> Color:
+	match element:
+		"Fogo": return Color("#ef654f")
+		"Agua": return Color("#4bbbd8")
+		"Terra": return Color("#c8925f")
+		"Ar": return Color("#a6dfe8")
+	return Color("#f3c969")
 
 func get_level_text() -> String:
 	return "Nivel MAX" if player.is_max_level() else "Nivel %d" % player.level

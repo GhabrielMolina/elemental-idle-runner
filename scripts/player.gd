@@ -5,6 +5,8 @@ signal died
 signal xp_changed(xp: int, level: int)
 signal leveled_up(level: int, unlocked_element: String)
 
+const UpgradeCatalog := preload("res://scripts/upgrade_catalog.gd")
+
 @export var max_health := 100
 @export var attack_range := 330.0
 @export var fire_range := 330.0
@@ -22,6 +24,10 @@ signal leveled_up(level: int, unlocked_element: String)
 @export var level_xp_thresholds: Array[int] = [100, 200, 300, 400]
 @export var element_unlock_levels: Dictionary[String, int] = {"Fogo": 1, "Agua": 2, "Terra": 3, "Ar": 4}
 @export var max_level_damage_multiplier := 1.25
+@export var water_slow_factor := 0.45
+@export var water_slow_duration := 2.0
+@export var earth_stun_duration := 1.0
+@export var air_push_distance := 70.0
 
 var health := 100
 var xp := 0
@@ -32,6 +38,8 @@ var air_timer := 0.0
 var water_timer := 0.0
 var earth_timer := 0.0
 var damage_bonus := false
+var element_xp: Dictionary[String, int] = {"Fogo": 0, "Agua": 0, "Terra": 0, "Ar": 0}
+var upgrade_levels: Dictionary[String, int] = {}
 @onready var sprite: Sprite2D = $Sprite
 var base_sprite_scale := Vector2.ONE
 var attack_tween: Tween
@@ -89,9 +97,88 @@ func add_xp(amount: int) -> int:
 	xp_changed.emit(xp, level)
 	return amount
 
+func add_element_xp(element: String, amount: int) -> void:
+	if element_xp.has(element) and amount > 0:
+		element_xp[element] += amount
+
+func get_element_xp(element: String) -> int:
+	return element_xp.get(element, 0)
+
+func get_total_element_xp() -> int:
+	var total := 0
+	for element in element_xp:
+		total += element_xp[element]
+	return total
+
+func get_upgrade_level(id: String) -> int:
+	return upgrade_levels.get(id, 0)
+
+func get_upgrade_number(id: String, key: String) -> float:
+	return float(UpgradeCatalog.get_value(id, key, get_upgrade_level(id), 0))
+
+func get_upgrade_percent(id: String, key: String) -> float:
+	return get_upgrade_number(id, key) / 100.0
+
+func get_upgrade_cost(id: String) -> int:
+	return UpgradeCatalog.get_cost(id, get_upgrade_level(id) + 1)
+
+func get_upgrade_funds(id: String) -> int:
+	var element := UpgradeCatalog.get_element(id)
+	return get_total_element_xp() if element == UpgradeCatalog.GENERAL else get_element_xp(element)
+
+func is_upgrade_unlocked(id: String) -> bool:
+	var element := UpgradeCatalog.get_element(id)
+	return element == UpgradeCatalog.GENERAL or (element != "" and is_element_unlocked(element))
+
+func can_purchase(id: String) -> bool:
+	var cost := get_upgrade_cost(id)
+	return cost > 0 and is_upgrade_unlocked(id) and get_upgrade_funds(id) >= cost
+
+func purchase(id: String) -> bool:
+	if not can_purchase(id):
+		return false
+	var cost := get_upgrade_cost(id)
+	var element := UpgradeCatalog.get_element(id)
+	if element == UpgradeCatalog.GENERAL:
+		spend_pooled_element_xp(cost)
+	else:
+		element_xp[element] -= cost
+	upgrade_levels[id] = get_upgrade_level(id) + 1
+	return true
+
+# Melhorias gerais: desconta primeiro do elemento com mais XP.
+func spend_pooled_element_xp(amount: int) -> void:
+	var remaining := amount
+	while remaining > 0:
+		var richest := ""
+		for element in element_xp:
+			if element_xp[element] > 0 and (richest == "" or element_xp[element] > element_xp[richest]):
+				richest = element
+		if richest == "":
+			return
+		var spent := mini(remaining, element_xp[richest])
+		element_xp[richest] -= spent
+		remaining -= spent
+
+func get_projectile_count() -> int:
+	if selected_element != "Fogo":
+		return 1
+	return maxi(1, roundi(get_upgrade_number("fogo_multiplo", "projectiles")))
+
+func get_damage_taken_multiplier(enemy: Node2D) -> float:
+	var multiplier := 1.0
+	if enemy.has_any_status():
+		multiplier += get_upgrade_percent("geral_ressonancia", "bonus_pct")
+	if enemy.is_stunned():
+		multiplier += get_upgrade_percent("terra_rachadura", "bonus_pct")
+	return multiplier
+
 func reset_progress() -> void:
 	xp = 0
 	level = 1
+	for element in element_xp:
+		element_xp[element] = 0
+	upgrade_levels.clear()
 	if not is_element_unlocked(selected_element):
 		selected_element = "Fogo"
 	xp_changed.emit(xp, level)
@@ -111,18 +198,20 @@ func get_attack_damage() -> int:
 	return damage * 2 if damage_bonus else damage
 
 func get_attack_range() -> float:
+	var base_range := fire_range
 	match selected_element:
-		"Agua": return water_range
-		"Terra": return earth_range
-		"Ar": return air_range
-	return fire_range
+		"Agua": base_range = water_range
+		"Terra": base_range = earth_range
+		"Ar": base_range = air_range
+	return base_range * (1.0 + get_upgrade_percent("geral_alcance", "range_pct"))
 
 func register_attack() -> void:
+	var cooldown_multiplier := 1.0 - get_upgrade_percent("geral_recarga", "cooldown_pct")
 	match selected_element:
-		"Fogo": fire_timer = fire_cooldown
-		"Agua": water_timer = water_cooldown
-		"Terra": earth_timer = earth_cooldown
-		"Ar": air_timer = air_cooldown
+		"Fogo": fire_timer = fire_cooldown * cooldown_multiplier
+		"Agua": water_timer = water_cooldown * cooldown_multiplier
+		"Terra": earth_timer = earth_cooldown * cooldown_multiplier
+		"Ar": air_timer = air_cooldown * cooldown_multiplier
 	play_attack_feedback()
 
 func get_cooldown_remaining(element: String) -> float:

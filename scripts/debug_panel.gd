@@ -42,6 +42,35 @@ func build_interface() -> void:
 	spawn_button.text = "Gerar inimigo"
 	spawn_button.pressed.connect(main_controller.debug_spawn_enemy)
 	column.add_child(spawn_button)
+	var health_row := HBoxContainer.new()
+	column.add_child(health_row)
+	var health_label := Label.new()
+	health_label.text = "Vida dos inimigos"
+	health_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	health_row.add_child(health_label)
+	var health_input := SpinBox.new()
+	health_input.custom_minimum_size = Vector2(90, 0)
+	health_input.min_value = 1
+	health_input.max_value = 9999
+	health_input.step = 1
+	health_input.select_all_on_focus = true
+	health_input.value = main_controller.get_enemy_max_health()
+	health_input.value_changed.connect(main_controller.debug_set_enemy_health)
+	var health_line_edit := health_input.get_line_edit()
+	health_line_edit.text_submitted.connect(func(_text: String) -> void: health_line_edit.release_focus())
+	health_row.add_child(health_input)
+	var add_xp_button := Button.new()
+	add_xp_button.text = "+100 XP"
+	add_xp_button.pressed.connect(main_controller.debug_add_xp)
+	column.add_child(add_xp_button)
+	var add_element_xp_button := Button.new()
+	add_element_xp_button.text = "+100 XP elemental"
+	add_element_xp_button.pressed.connect(main_controller.debug_add_element_xp)
+	column.add_child(add_element_xp_button)
+	var reset_progress_button := Button.new()
+	reset_progress_button.text = "Zerar progresso"
+	reset_progress_button.pressed.connect(main_controller.debug_reset_progress)
+	column.add_child(reset_progress_button)
 	var reset_button := Button.new()
 	reset_button.text = "Reiniciar partida"
 	reset_button.pressed.connect(main_controller.restart_game)

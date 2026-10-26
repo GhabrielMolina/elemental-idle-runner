@@ -130,6 +130,9 @@ func _input(event: InputEvent) -> void:
 	if not event is InputEventKey or not event.pressed or event.echo:
 		return
 	if event.keycode == KEY_P:
+		# Nao abrir a loja enquanto se digita em um campo (ex.: vida dos inimigos no debug).
+		if get_viewport().gui_get_focus_owner() is LineEdit:
+			return
 		if visible:
 			close()
 		else:

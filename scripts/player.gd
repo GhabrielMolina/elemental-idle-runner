@@ -28,6 +28,10 @@ const UpgradeCatalog := preload("res://scripts/upgrade_catalog.gd")
 @export var water_slow_duration := 2.0
 @export var earth_stun_duration := 1.0
 @export var air_push_distance := 70.0
+# Atacante -> elementos de inimigo que ele vence (separados por virgula). Sem vantagem o dano e normal.
+@export var element_advantages: Dictionary[String, String] = {"Agua": "Fogo,Terra", "Fogo": "Ar", "Ar": "Agua", "Terra": "Fogo"}
+@export var advantage_multiplier_min := 1.25
+@export var advantage_multiplier_max := 1.5
 
 var health := 100
 var xp := 0
@@ -165,13 +169,25 @@ func get_projectile_count() -> int:
 		return 1
 	return maxi(1, roundi(get_upgrade_number("fogo_multiplo", "projectiles")))
 
-func get_damage_taken_multiplier(enemy: Node2D) -> float:
+func get_damage_taken_multiplier(enemy: Node2D, source_element := "") -> float:
 	var multiplier := 1.0
 	if enemy.has_any_status():
 		multiplier += get_upgrade_percent("geral_ressonancia", "bonus_pct")
 	if enemy.is_stunned():
 		multiplier += get_upgrade_percent("terra_rachadura", "bonus_pct")
-	return multiplier
+	return multiplier * roll_element_multiplier(source_element, enemy.element)
+
+func has_element_advantage(attacker: String, defender: String) -> bool:
+	for element_name in element_advantages.get(attacker, "").split(","):
+		if element_name.strip_edges() == defender:
+			return true
+	return false
+
+# Sorteado a cada instancia de dano (inclusive ticks de queimadura e afogamento).
+func roll_element_multiplier(attacker: String, defender: String) -> float:
+	if not has_element_advantage(attacker, defender):
+		return 1.0
+	return randf_range(advantage_multiplier_min, maxf(advantage_multiplier_min, advantage_multiplier_max))
 
 func reset_progress() -> void:
 	xp = 0

@@ -35,6 +35,9 @@ var wave_defeated_count := 0
 var speed_index := 0
 var speeds := [1.0, 2.0, 3.0]
 var air_attack_counter := 0
+var default_enemy_health := 45
+# Definido pelo painel de debug; 0 usa a vida padrao do Enemy.tscn.
+var enemy_health_override := 0
 
 var health_bar: ProgressBar
 var health_label: Label
@@ -49,6 +52,7 @@ var element_label: Label
 var cooldown_label: Label
 var bonus_label: Label
 var command_label: Label
+var advantage_label: Label
 var defeat_overlay: PanelContainer
 var defeat_label: Label
 var overlay_message: Label
@@ -61,10 +65,14 @@ var element_buttons: Array[Button] = []
 
 func _ready() -> void:
 	spawn_rng.randomize()
+	var enemy_probe := ENEMY_SCENE.instantiate()
+	default_enemy_health = enemy_probe.max_health
+	enemy_probe.free()
 	build_hud()
 	debug_panel = DEBUG_SCENE.instantiate()
 	add_child(debug_panel)
 	debug_panel.position = Vector2(700, 160)
+	debug_panel.z_index = 50
 	debug_panel.setup(self)
 	shop_panel = SHOP_SCENE.instantiate()
 	hud_layer.add_child(shop_panel)
@@ -124,6 +132,7 @@ func spawn_enemy(enemy_element: String, is_wave_enemy: bool) -> void:
 	enemy.position = Vector2(1000, 430)
 	enemy.element = enemy_element
 	enemy.counts_for_wave = is_wave_enemy
+	enemy.max_health = get_enemy_max_health()
 	enemy.damage_modifier = player.get_damage_taken_multiplier
 	add_child(enemy)
 	enemy.add_to_group("runtime_entity")
@@ -229,6 +238,20 @@ func debug_reset_progress() -> void:
 	air_attack_counter = 0
 	update_hud()
 
+func get_enemy_max_health() -> int:
+	return enemy_health_override if enemy_health_override > 0 else default_enemy_health
+
+# Vale para os proximos inimigos e ajusta os vivos mantendo a proporcao da vida atual.
+func debug_set_enemy_health(value: float) -> void:
+	enemy_health_override = maxi(1, roundi(value))
+	for enemy in get_tree().get_nodes_in_group("enemies"):
+		if not is_instance_valid(enemy) or enemy.already_defeated:
+			continue
+		var ratio := float(enemy.health) / float(maxi(1, enemy.max_health))
+		enemy.max_health = enemy_health_override
+		enemy.health = maxi(1, roundi(enemy_health_override * ratio))
+		enemy.queue_redraw()
+
 func select_element(element: String) -> void:
 	if game_over:
 		return
@@ -298,7 +321,9 @@ func apply_hit(enemy: Node2D, damage: int, element: String) -> void:
 		return
 	var was_slowed: bool = enemy.is_slowed()
 	var push_distance: float = player.air_push_distance if element == "Ar" else 0.0
-	enemy.receive_damage(damage, element, push_distance)
+	var dealt: int = enemy.receive_damage(damage, element, push_distance)
+	if player.has_element_advantage(element, enemy.element):
+		spawn_floating_text(enemy.global_position + Vector2(randf_range(-16.0, 4.0), -96), "%d!" % dealt, Color("#f3c969"), 22)
 	if enemy.already_defeated:
 		return
 	match element:
@@ -440,16 +465,19 @@ func grant_kill_xp(at: Vector2, element: String) -> void:
 	var amount := spawn_rng.randi_range(min_xp_per_kill, maxi(min_xp_per_kill, max_xp_per_kill))
 	player.add_xp(amount)
 	player.add_element_xp(element, amount)
-	spawn_xp_popup(at, amount, element)
+	var text := "+%d XP %s" % [amount, element] if element != "" else "+%d XP" % amount
+	spawn_floating_text(at + Vector2(-24, -110), text, get_element_color(element))
 
-func spawn_xp_popup(at: Vector2, amount: int, element: String) -> void:
+func spawn_floating_text(at: Vector2, text: String, color: Color, font_size := 0) -> void:
 	var popup := Label.new()
-	popup.text = "+%d XP %s" % [amount, element] if element != "" else "+%d XP" % amount
-	popup.add_theme_color_override("font_color", get_element_color(element))
+	popup.text = text
+	if font_size > 0:
+		popup.add_theme_font_size_override("font_size", font_size)
+	popup.add_theme_color_override("font_color", color)
 	popup.add_theme_color_override("font_outline_color", Color("#162d42"))
 	popup.add_theme_constant_override("outline_size", 4)
 	popup.z_index = 10
-	popup.position = at + Vector2(-24, -110)
+	popup.position = at
 	add_child(popup)
 	var tween := popup.create_tween()
 	tween.set_parallel()
@@ -563,6 +591,10 @@ func build_hud() -> void:
 	command_label = Label.new()
 	command_label.add_theme_color_override("font_color", Color("#a7a39a"))
 	column.add_child(command_label)
+	advantage_label = Label.new()
+	advantage_label.text = get_advantage_text()
+	advantage_label.add_theme_color_override("font_color", Color("#a7a39a"))
+	column.add_child(advantage_label)
 	element_buttons.append(create_element_button(canvas, "1  Fogo", "Fogo", Vector2(590, 24)))
 	element_buttons.append(create_element_button(canvas, "2  Agua", "Agua", Vector2(725, 24)))
 	element_buttons.append(create_element_button(canvas, "3  Terra", "Terra", Vector2(590, 66)))
@@ -651,6 +683,15 @@ func update_hud() -> void:
 		element_buttons[index].disabled = not unlocked
 	if is_instance_valid(shop_panel) and shop_panel.visible:
 		shop_panel.refresh()
+
+func get_advantage_text() -> String:
+	var parts := PackedStringArray()
+	for attacker in player.element_advantages:
+		var defenders: String = player.element_advantages[attacker]
+		parts.append("%s > %s" % [attacker, defenders.replace(" ", "").replace(",", ", ")])
+	var bonus_min := roundi((player.advantage_multiplier_min - 1.0) * 100.0)
+	var bonus_max := roundi((player.advantage_multiplier_max - 1.0) * 100.0)
+	return "Vantagem +%d-%d%%: %s" % [bonus_min, bonus_max, " | ".join(parts)]
 
 func get_element_color(element: String) -> Color:
 	match element:

@@ -63,6 +63,8 @@ Selecione a instancia `Player` em `Main.tscn` ou abra `Player.tscn`.
 - `water_slow_factor` e `water_slow_duration`: lentidao base da Agua (`0.45` da velocidade por `2.0` s).
 - `earth_stun_duration`: atordoamento base da Terra (`1.0` s).
 - `air_push_distance`: empurrao base do Ar (`70` px).
+- `element_advantages`: tabela de vantagem elemental (atacante -> elementos de inimigo que ele vence, separados por virgula). Veja "Vantagem elemental".
+- `advantage_multiplier_min` e `advantage_multiplier_max`: faixa do multiplicador sorteado quando ha vantagem (`1.25` a `1.5`).
 - `damage_bonus`, `xp`, `level` e os timers sao estados internos; nao precisam ser editados no Inspector.
 
 Essas propriedades ficam em `scripts/player.gd` e aparecem no Inspector porque usam `@export`.
@@ -71,12 +73,28 @@ Essas propriedades ficam em `scripts/player.gd` e aparecem no Inspector porque u
 
 Selecione `Enemy.tscn`.
 
-- `max_health`: vida do inimigo. Aumentar torna o inimigo mais resistente.
+- `max_health`: vida padrao do inimigo. Aumentar torna o inimigo mais resistente. O campo `Vida dos inimigos` do painel de debug sobrescreve esse valor durante a sessao.
 - `speed`: velocidade de avanco. Aumentar aproxima o inimigo mais rapidamente.
 - `contact_damage`: dano causado ao tocar o Avatar.
-- `element`: cor identificadora do inimigo quando ele e instanciado.
+- `element`: elemento do inimigo. Define a cor e qual elemento do Avatar tem vantagem contra ele.
 
 A wave define o elemento automaticamente; em geral, altere os elementos em `Main`, nao neste valor padrao.
+
+### Vantagem elemental
+
+Quando o elemento do golpe vence o elemento do inimigo, o dano e multiplicado por um valor sorteado entre `1.25` e `1.5` (a cada instancia de dano). Nos demais casos (inclusive o inverso e o mesmo elemento) o dano e normal.
+
+| Atacante | Tem vantagem contra |
+|---|---|
+| Agua | Fogo e Terra |
+| Fogo | Ar |
+| Ar | Agua |
+| Terra | Fogo |
+
+- Vale para todo dano com elemento: projeteis, explosao, onda, tremor, ricochete, tufao e os ticks de queimadura e afogamento. A execucao do afogamento nao e afetada.
+- O multiplicador elemental multiplica os bonus da loja: `(1 + Ressonancia + Rachadura) x vantagem`.
+- Golpes com vantagem mostram o dano final em dourado (`24!`) sobre o inimigo. A tabela tambem aparece na HUD.
+- A tabela e a faixa do multiplicador ficam no Player (`element_advantages`, `advantage_multiplier_min`, `advantage_multiplier_max`); a regra fica em `get_damage_taken_multiplier()` de `scripts/player.gd`.
 
 ### Essencia
 
@@ -159,7 +177,7 @@ Nas waves com dois elementos, a escolha e feita novamente a cada spawn.
 
 ### HUD, vitoria e derrota
 
-A HUD e construida em `build_hud()` de `scripts/main.gd`. O indicador `Wave X/4`, progresso, vida, nivel, barra de XP, XP elemental, recarga e essencias sao atualizados em `update_hud()`.
+A HUD e construida em `build_hud()` de `scripts/main.gd`. O indicador `Wave X/4`, progresso, vida, nivel, barra de XP, XP elemental, recarga e essencias sao atualizados em `update_hud()`. A linha de vantagens elementais e montada a partir de `element_advantages` do Player.
 
 As telas reutilizam o painel `defeat_overlay`:
 
@@ -185,6 +203,7 @@ O painel de debug oferece:
 - Pausar e continuar.
 - Alternar `1x`, `2x` e `3x`.
 - Gerar um inimigo manualmente.
+- `Vida dos inimigos`: define a vida de todos os inimigos. Vale para os proximos e ajusta os vivos mantendo a proporcao da vida atual. Digite o valor e aperte Enter (ou use as setas). O valor e mantido ao reiniciar a partida ou zerar o progresso.
 - `+100 XP`: adiciona 100 XP (sobe um nivel por clique).
 - `+100 XP elemental`: adiciona 100 XP a cada elemento, para testar a loja.
 - `Zerar progresso`: volta ao Nivel 1 apenas com Fogo e zera XP elemental e melhorias.

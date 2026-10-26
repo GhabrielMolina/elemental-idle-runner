@@ -69,12 +69,13 @@ func process_damage_over_time(delta: float) -> void:
 			drown_tick_timer += STATUS_TICK_INTERVAL
 			receive_damage(drown_tick_damage, "Agua")
 
-func receive_damage(amount: int, source_element := "", push_distance := 0.0) -> void:
+# Retorna o dano final aplicado (depois de Ressonancia, Rachadura e vantagem elemental).
+func receive_damage(amount: int, source_element := "", push_distance := 0.0) -> int:
 	if already_defeated:
-		return
+		return 0
 	var final_amount := amount
 	if damage_modifier.is_valid():
-		final_amount = roundi(amount * float(damage_modifier.call(self)))
+		final_amount = roundi(amount * float(damage_modifier.call(self, source_element)))
 	if source_element != "":
 		last_damage_element = source_element
 	health = maxi(0, health - final_amount)
@@ -86,6 +87,7 @@ func receive_damage(amount: int, source_element := "", push_distance := 0.0) -> 
 		die(true)
 	else:
 		check_drown_execution()
+	return final_amount
 
 func apply_burn(tick_damage: int, duration: float) -> void:
 	if already_defeated or tick_damage <= 0 or duration <= 0.0:

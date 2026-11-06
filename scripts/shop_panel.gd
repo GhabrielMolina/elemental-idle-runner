@@ -133,7 +133,7 @@ func _input(event: InputEvent) -> void:
 		# Nao abrir a loja enquanto se digita em um campo (ex.: vida dos inimigos no debug).
 		if get_viewport().gui_get_focus_owner() is LineEdit:
 			return
-		if not visible and (not main_controller.campaign_started or main_controller.game_over or main_controller.final_victory):
+		if not visible and (not main_controller.campaign_started or main_controller.game_over):
 			return
 		if visible:
 			close()

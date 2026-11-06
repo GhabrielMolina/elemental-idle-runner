@@ -34,11 +34,15 @@ const ELEMENT_TEXTURES := {
 @onready var player: Node2D = $Player
 @onready var background: Sprite2D = $Background
 
-@export var min_spawn_interval: float = 1.8
-@export var max_spawn_interval: float = 2.6
+@export var min_spawn_interval: float = 8.0
+@export var max_spawn_interval: float = 10.0
+@export var enemies_per_group: int = 4
+@export var group_enemy_spacing: float = 100.0
 @export var belt_speed: float = 56.0
-@export var wave_enemy_counts: Array[int] = [5, 7, 8, 10, 12]
+@export var wave_enemy_counts: Array[int] = [12, 15, 18, 21, 24]
 @export var wave_element_options: Array[String] = ["Agua", "Terra", "Fogo", "Ar", "Fogo,Agua,Terra,Ar"]
+@export var enemy_health_per_wave: int = 5
+@export var wave_enemy_count_per_cycle: int = 3
 @export var min_xp_per_kill := 13
 @export var max_xp_per_kill := 20
 
@@ -50,10 +54,11 @@ var bonus_timer := 0.0
 var defeated_count := 0
 var essence_count := 0
 var game_over := false
-var final_victory := false
-var awaiting_next_wave := false
 var campaign_started := false
 var current_wave := 0
+var selected_start_wave := 0
+var unlocked_phase_count := 1
+var farm_current_wave := false
 var wave_spawned_count := 0
 var wave_defeated_count := 0
 var wave_start_essence_count := 0
@@ -84,6 +89,8 @@ var defeat_overlay: PanelContainer
 var defeat_label: Label
 var overlay_message: Label
 var overlay_stats: Label
+var phase_selector_label: Label
+var phase_selector: OptionButton
 var overlay_button: Button
 var debug_panel: PanelContainer
 var shop_panel: PanelContainer
@@ -91,6 +98,7 @@ var hud_layer: CanvasLayer
 var ground_tiles: Array[Sprite2D] = []
 var transition_rect: ColorRect
 var transition_tween: Tween
+var wave_mode_button: Button
 var essence_label: Label
 var essence_counter: PanelContainer
 var bonus_indicator: PanelContainer
@@ -105,6 +113,7 @@ var element_buttons: Array[Button] = []
 
 func _ready() -> void:
 	spawn_rng.randomize()
+	load_progress()
 	var enemy_probe := ENEMY_SCENE.instantiate()
 	default_enemy_health = enemy_probe.max_health
 	enemy_probe.free()
@@ -130,7 +139,7 @@ func _ready() -> void:
 	queue_redraw()
 
 func _process(delta: float) -> void:
-	if not campaign_started or game_over or final_victory or awaiting_next_wave:
+	if not campaign_started or game_over:
 		return
 	belt_offset = fmod(belt_offset + belt_speed * delta, 80.0)
 	enemy_timer -= delta
@@ -140,8 +149,7 @@ func _process(delta: float) -> void:
 		player.damage_bonus = false
 		update_hud()
 	if enemy_timer <= 0.0 and wave_spawned_count < get_current_wave_total():
-		spawn_enemy(choose_wave_element(), true)
-		wave_spawned_count += 1
+		spawn_enemy_group()
 		enemy_timer = get_next_spawn_interval()
 	if essence_timer <= 0.0:
 		spawn_essence()
@@ -155,25 +163,25 @@ func _process(delta: float) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if not event is InputEventKey or not event.pressed or event.echo:
 		return
-	if event.keycode == KEY_1 and campaign_started and not game_over and not final_victory:
+	if event.keycode == KEY_1 and campaign_started and not game_over:
 		select_element("Fogo")
-	elif event.keycode == KEY_2 and campaign_started and not game_over and not final_victory:
+	elif event.keycode == KEY_2 and campaign_started and not game_over:
 		select_element("Agua")
-	elif event.keycode == KEY_3 and campaign_started and not game_over and not final_victory:
+	elif event.keycode == KEY_3 and campaign_started and not game_over:
 		select_element("Terra")
-	elif event.keycode == KEY_4 and campaign_started and not game_over and not final_victory:
+	elif event.keycode == KEY_4 and campaign_started and not game_over:
 		select_element("Ar")
-	elif event.keycode == KEY_E and campaign_started and not game_over and not final_victory:
+	elif event.keycode == KEY_E and campaign_started and not game_over:
 		collect_nearby_essence()
-	elif event.keycode == KEY_Q and campaign_started and not game_over and not final_victory:
+	elif event.keycode == KEY_Q and campaign_started and not game_over:
 		activate_bonus()
 	update_hud()
 
-func spawn_enemy(enemy_element: String, is_wave_enemy: bool) -> void:
-	if game_over or final_victory:
+func spawn_enemy(enemy_element: String, is_wave_enemy: bool, spawn_position: Vector2 = Vector2(1000.0, 430.0)) -> void:
+	if game_over:
 		return
 	var enemy := ENEMY_SCENE.instantiate()
-	enemy.position = Vector2(1000, 430)
+	enemy.position = spawn_position
 	enemy.element = enemy_element
 	enemy.counts_for_wave = is_wave_enemy
 	enemy.max_health = get_enemy_max_health()
@@ -184,21 +192,31 @@ func spawn_enemy(enemy_element: String, is_wave_enemy: bool) -> void:
 	enemy.add_to_group("wave_enemies" if is_wave_enemy else "debug_enemies")
 	enemy.defeated.connect(_on_enemy_defeated.bind(enemy, is_wave_enemy))
 
+func spawn_enemy_group() -> void:
+	var group_size: int = mini(maxi(1, enemies_per_group), get_current_wave_total() - wave_spawned_count)
+	for index in group_size:
+		var spawn_position := Vector2(1000.0 + index * maxf(0.0, group_enemy_spacing), 430.0)
+		spawn_enemy(choose_wave_element(), true, spawn_position)
+	wave_spawned_count += group_size
+
 func get_next_spawn_interval() -> float:
 	var safe_minimum: float = maxf(min_spawn_interval, 0.01)
 	var safe_maximum: float = maxf(max_spawn_interval, safe_minimum)
 	return spawn_rng.randf_range(safe_minimum, safe_maximum)
 
 func get_current_wave_total() -> int:
-	if current_wave < 0 or current_wave >= wave_enemy_counts.size():
+	if current_wave < 0 or wave_enemy_counts.is_empty():
 		return 0
-	return maxi(0, wave_enemy_counts[current_wave])
+	var config_index := posmod(current_wave, wave_enemy_counts.size())
+	var cycle := floori(float(current_wave) / wave_enemy_counts.size())
+	return maxi(0, wave_enemy_counts[config_index] + cycle * maxi(0, wave_enemy_count_per_cycle))
 
 func get_current_wave_elements() -> Array[String]:
 	var elements: Array[String] = []
-	if current_wave < 0 or current_wave >= wave_element_options.size():
+	if current_wave < 0 or wave_element_options.is_empty():
 		return elements
-	for element_name in wave_element_options[current_wave].split(","):
+	var config_index := posmod(current_wave, wave_element_options.size())
+	for element_name in wave_element_options[config_index].split(","):
 		var clean_name := element_name.strip_edges()
 		if clean_name != "":
 			elements.append(clean_name)
@@ -211,14 +229,12 @@ func choose_wave_element() -> String:
 	return elements[spawn_rng.randi_range(0, elements.size() - 1)]
 
 func start_wave(wave_index: int, save_wave_resources := true) -> void:
-	if wave_index < 0 or wave_index >= wave_enemy_counts.size():
+	if wave_index < 0 or wave_enemy_counts.is_empty():
 		return
 	current_wave = wave_index
 	wave_spawned_count = 0
 	wave_defeated_count = 0
 	enemy_timer = 0.0
-	awaiting_next_wave = false
-	final_victory = false
 	game_over = false
 	if save_wave_resources:
 		wave_start_essence_count = essence_count
@@ -227,10 +243,24 @@ func start_wave(wave_index: int, save_wave_resources := true) -> void:
 	defeat_overlay.visible = false
 	update_hud()
 
-func apply_map(wave_index: int) -> void:
-	if wave_index < 0 or wave_index >= MAP_KEYS.size():
+func select_start_wave(wave_index: int) -> void:
+	if wave_index < 0 or wave_index >= unlocked_phase_count:
 		return
-	var map_key: String = MAP_KEYS[wave_index]
+	selected_start_wave = wave_index
+	if not campaign_started or game_over:
+		return
+	for entity in get_tree().get_nodes_in_group("runtime_entity"):
+		if is_instance_valid(entity):
+			entity.queue_free()
+	player.reset()
+	bonus_timer = 0.0
+	air_attack_counter = 0
+	start_wave(selected_start_wave)
+
+func apply_map(wave_index: int) -> void:
+	if wave_index < 0:
+		return
+	var map_key: String = MAP_KEYS[posmod(wave_index, MAP_KEYS.size())]
 	background.texture = MAP_BACKGROUNDS[map_key]
 	for tile_index in range(1, 7):
 		var tile := get_node_or_null("GroundTile%02d" % tile_index) as Sprite2D
@@ -249,14 +279,14 @@ func play_map_transition() -> void:
 func show_start_screen() -> void:
 	campaign_started = false
 	game_over = false
-	final_victory = false
-	awaiting_next_wave = false
 	player.set_process(false)
 	defeat_overlay.visible = true
 	defeat_label.text = "Elemental Idle Runner"
 	overlay_message.text = "Quatro elementos. Um unico proposito."
-	overlay_stats.text = "Restaure o equilibrio entre cinco regioes.\n1-4 escolhem elementos | E coleta | Q usa essencias"
+	overlay_stats.text = "Escolha uma regiao para iniciar.\n1-4 escolhem elementos | E coleta | Q usa essencias"
 	overlay_button.text = "Iniciar jornada"
+	selected_start_wave = mini(selected_start_wave, unlocked_phase_count - 1)
+	phase_selector.select(selected_start_wave)
 
 func begin_campaign() -> void:
 	get_tree().paused = false
@@ -266,10 +296,9 @@ func begin_campaign() -> void:
 	essence_count = 0
 	bonus_timer = 0.0
 	game_over = false
-	final_victory = false
 	campaign_started = true
 	player.set_process(true)
-	start_wave(0)
+	start_wave(selected_start_wave)
 	update_debug()
 
 func retry_current_wave() -> void:
@@ -295,49 +324,69 @@ func has_active_enemies(group_name: String) -> bool:
 	return false
 
 func check_wave_completion() -> void:
-	if awaiting_next_wave or wave_spawned_count < get_current_wave_total():
+	if wave_spawned_count < get_current_wave_total():
 		return
 	if wave_defeated_count < get_current_wave_total():
 		return
 	if has_active_enemies("wave_enemies") or has_active_enemies("debug_enemies"):
 		return
-	if current_wave == wave_enemy_counts.size() - 1:
-		show_final_victory()
+	var next_phase := posmod(current_wave + 1, REGION_NAMES.size())
+	if next_phase > 0:
+		unlock_phase(next_phase)
+	if farm_current_wave:
+		start_wave(current_wave)
 	else:
-		show_wave_complete()
+		current_wave += 1
+		selected_start_wave = posmod(current_wave, REGION_NAMES.size())
+		phase_selector.select(selected_start_wave)
+		start_wave(current_wave)
 
-func show_wave_complete() -> void:
-	awaiting_next_wave = true
-	defeat_overlay.visible = true
-	defeat_label.text = "Wave concluida!"
-	overlay_message.text = "%s foi superada." % REGION_NAMES[current_wave]
-	overlay_stats.text = "Proxima: %s\nInimigos derrotados: %d" % [REGION_NAMES[current_wave + 1], wave_defeated_count]
-	overlay_button.text = "Proxima fase"
-	update_hud()
+func load_progress() -> void:
+	var progress := ConfigFile.new()
+	var error := progress.load("user://progress.cfg")
+	if error == ERR_FILE_NOT_FOUND:
+		return
+	if error != OK:
+		push_error("Nao foi possivel carregar o progresso: %s" % error_string(error))
+		return
+	var saved_count: Variant = progress.get_value("campaign", "unlocked_phase_count", 1)
+	if typeof(saved_count) != TYPE_INT:
+		push_error("Progresso invalido: unlocked_phase_count deve ser um inteiro.")
+		return
+	unlocked_phase_count = clampi(int(saved_count), 1, REGION_NAMES.size())
 
-func show_final_victory() -> void:
-	final_victory = true
-	defeat_overlay.visible = true
-	defeat_label.text = "Vitoria!"
-	overlay_message.text = "Equilibrio restaurado! As cinco regioes foram superadas."
-	overlay_stats.text = "Total de inimigos derrotados: %d\n%s" % [defeated_count, get_level_text()]
-	overlay_button.text = "Jogar novamente"
+func save_progress() -> void:
+	var progress := ConfigFile.new()
+	progress.set_value("campaign", "unlocked_phase_count", unlocked_phase_count)
+	var error := progress.save("user://progress.cfg")
+	if error != OK:
+		push_error("Nao foi possivel salvar o progresso: %s" % error_string(error))
+
+func unlock_phase(phase_index: int) -> void:
+	if phase_index != unlocked_phase_count or unlocked_phase_count >= REGION_NAMES.size():
+		return
+	unlocked_phase_count += 1
+	refresh_phase_selector()
+	save_progress()
+
+func refresh_phase_selector() -> void:
+	for index in REGION_NAMES.size():
+		phase_selector.set_item_disabled(index, index >= unlocked_phase_count)
+
+func toggle_wave_mode() -> void:
+	farm_current_wave = not farm_current_wave
 	update_hud()
 
 func handle_overlay_action() -> void:
 	if not campaign_started:
 		begin_campaign()
-	elif awaiting_next_wave:
-		start_wave(current_wave + 1)
 	elif game_over:
 		retry_current_wave()
-	elif final_victory:
-		show_start_screen()
 	else:
 		begin_campaign()
 
 func debug_spawn_enemy() -> void:
-	if campaign_started and not game_over and not final_victory and not awaiting_next_wave:
+	if campaign_started and not game_over:
 		spawn_enemy(choose_wave_element(), false)
 
 func debug_add_xp() -> void:
@@ -355,7 +404,9 @@ func debug_reset_progress() -> void:
 	update_hud()
 
 func get_enemy_max_health() -> int:
-	return enemy_health_override if enemy_health_override > 0 else default_enemy_health
+	if enemy_health_override > 0:
+		return enemy_health_override
+	return default_enemy_health + current_wave * maxi(0, enemy_health_per_wave)
 
 # Vale para os proximos inimigos e ajusta os vivos mantendo a proporcao da vida atual.
 func debug_set_enemy_health(value: float) -> void:
@@ -625,14 +676,7 @@ func show_level_up_message(new_level: int, unlocked_element: String) -> void:
 
 func handle_defeat() -> void:
 	game_over = true
-	awaiting_next_wave = false
-	defeat_overlay.visible = true
-	defeat_label.text = "Game Over"
-	overlay_message.text = "O Avatar foi derrotado em %s." % REGION_NAMES[current_wave]
-	overlay_stats.text = "Wave %d/5 | Derrotados nesta tentativa: %d\nA campanha permanece nesta fase." % [current_wave + 1, wave_defeated_count]
-	overlay_button.text = "Tentar novamente"
-	update_hud()
-	update_debug()
+	call_deferred("retry_current_wave")
 
 func restart_game() -> void:
 	shop_panel.close()
@@ -649,6 +693,8 @@ func restart_game() -> void:
 	essence_timer = 3.0
 	air_attack_counter = 0
 	game_over = false
+	selected_start_wave = 0
+	phase_selector.select(selected_start_wave)
 	begin_campaign()
 	update_hud()
 	update_debug()
@@ -746,7 +792,23 @@ func build_hud() -> void:
 	for button in element_buttons:
 		button.move_to_front()
 	interaction_label = Label.new()
-	interaction_label.position = Vector2(18, 150)
+	phase_selector_label = Label.new()
+	phase_selector_label.text = "Selecionar fase"
+	phase_selector_label.position = Vector2(18, 150)
+	phase_selector_label.add_theme_color_override("font_color", Color("#d9e8df"))
+	phase_selector_label.add_theme_color_override("font_outline_color", Color("#162d42"))
+	phase_selector_label.add_theme_constant_override("outline_size", 3)
+	canvas.add_child(phase_selector_label)
+	phase_selector = OptionButton.new()
+	phase_selector.position = Vector2(18, 172)
+	phase_selector.size = Vector2(300, 34)
+	for index in REGION_NAMES.size():
+		phase_selector.add_item("Fase %d - %s" % [index + 1, REGION_NAMES[index]])
+	phase_selector.select(selected_start_wave)
+	refresh_phase_selector()
+	phase_selector.item_selected.connect(select_start_wave)
+	canvas.add_child(phase_selector)
+	interaction_label.position = Vector2(18, 214)
 	interaction_label.add_theme_color_override("font_color", Color("#d9e8df"))
 	interaction_label.add_theme_color_override("font_outline_color", Color("#162d42"))
 	interaction_label.add_theme_constant_override("outline_size", 3)
@@ -758,6 +820,12 @@ func build_hud() -> void:
 	shop_button.pivot_offset = shop_button.size / 2.0
 	shop_button.tooltip_text = "Abrir loja de melhorias"
 	canvas.add_child(shop_button)
+	wave_mode_button = Button.new()
+	wave_mode_button.position = Vector2(500, 18)
+	wave_mode_button.size = Vector2(180, 42)
+	wave_mode_button.tooltip_text = "Alternar entre avancar para a proxima wave e repetir esta wave para farmar"
+	wave_mode_button.pressed.connect(toggle_wave_mode)
+	canvas.add_child(wave_mode_button)
 	var essence_panel := PanelContainer.new()
 	essence_panel.position = Vector2(790, 18)
 	essence_panel.custom_minimum_size = Vector2(150, 58)
@@ -796,8 +864,8 @@ func build_hud() -> void:
 	canvas.add_child(level_up_label)
 	defeat_overlay = PanelContainer.new()
 	defeat_overlay.process_mode = Node.PROCESS_MODE_ALWAYS
-	defeat_overlay.position = Vector2(300, 175)
-	defeat_overlay.custom_minimum_size = Vector2(360, 190)
+	defeat_overlay.position = Vector2(280, 125)
+	defeat_overlay.custom_minimum_size = Vector2(400, 290)
 	canvas.add_child(defeat_overlay)
 	var overlay_margin := MarginContainer.new()
 	overlay_margin.add_theme_constant_override("margin_left", 22)
@@ -873,8 +941,8 @@ func update_hud() -> void:
 		xp_bar.max_value = player.get_next_level_xp()
 		xp_bar.value = player.xp
 	element_xp_label.text = "XP elemental   Fogo %d   Agua %d   Terra %d   Ar %d" % [player.get_element_xp("Fogo"), player.get_element_xp("Agua"), player.get_element_xp("Terra"), player.get_element_xp("Ar")]
-	wave_label.text = "Wave %d/5   Progresso: %d/%d" % [current_wave + 1, wave_defeated_count, get_current_wave_total()]
-	region_label.text = REGION_NAMES[current_wave].to_upper()
+	wave_label.text = "Wave %d   Progresso: %d/%d" % [current_wave + 1, wave_defeated_count, get_current_wave_total()]
+	region_label.text = REGION_NAMES[posmod(current_wave, REGION_NAMES.size())].to_upper()
 	wave_progress.max_value = maxi(1, get_current_wave_total())
 	wave_progress.value = wave_defeated_count
 	stats_label.text = "Inimigos derrotados: %d   Essencias: %d / 3" % [defeated_count, essence_count]
@@ -889,7 +957,9 @@ func update_hud() -> void:
 	if player.damage_bonus and not last_bonus_active:
 		animate_bonus_feedback()
 	last_bonus_active = player.damage_bonus
-	shop_button.disabled = not campaign_started or game_over or final_victory
+	shop_button.disabled = not campaign_started or game_over
+	wave_mode_button.text = "Modo: Farmar" if farm_current_wave else "Modo: Progredir"
+	wave_mode_button.disabled = not campaign_started or game_over
 	var elements := ["Fogo", "Agua", "Terra", "Ar"]
 	var labels := ["1", "2", "3", "4"]
 	for index in element_buttons.size():

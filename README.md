@@ -2,7 +2,7 @@
 
 ## Visao geral
 
-Elemental Idle Runner e um auto-battler 2D side-scroller feito com Godot 4.7 e GDScript. O Avatar escolhe elementos, ataca automaticamente, coleta essencias manualmente e atravessa uma campanha de cinco regioes.
+Elemental Idle Runner e um auto-battler 2D side-scroller feito com Godot 4.7 e GDScript. O Avatar escolhe elementos, ataca automaticamente, coleta essencias manualmente e percorre ondas infinitas em cinco regioes.
 
 A cena principal e `res://scenes/Main.tscn`.
 
@@ -13,6 +13,7 @@ A cena principal e `res://scenes/Main.tscn`.
 3. Consulte o painel **Debugger** e o console da Godot para erros de execucao.
 
 A campanha comeca pela tela inicial, no botao `Iniciar jornada`.
+O seletor `Selecionar fase` fica sempre visivel na HUD. No inicio, apenas a Fase 1 esta liberada; cada fase seguinte e desbloqueada ao vencer a wave da fase anterior, inclusive no modo Farmar. Desbloqueios sao salvos entre partidas em `user://progress.cfg`. Durante a partida, selecionar uma fase ja liberada limpa a wave atual, restaura a vida do Avatar e inicia a regiao escolhida, preservando XP e melhorias.
 
 ## Estrutura
 
@@ -29,7 +30,7 @@ A campanha comeca pela tela inicial, no botao `Iniciar jornada`.
 
 ### Scripts principais
 
-- `scripts/main.gd`: campanha, waves, spawn, combate, HUD, mapas, transicoes, Game Over e vitoria.
+- `scripts/main.gd`: campanha, waves, spawn, combate, HUD, mapas, transicoes e Game Over.
 - `scripts/player.gd`: vida, elementos, recargas, XP, niveis e melhorias.
 - `scripts/enemy.gd`: vida, movimento, elementos, status, dano e morte.
 - `scripts/projectile.gd`: movimento e sinal de impacto.
@@ -47,30 +48,36 @@ A campanha comeca pela tela inicial, no botao `Iniciar jornada`.
 
 Cada mapa possui `background.svg` e `ground.svg`.
 
-## Campanha de cinco fases
+## Campanha infinita e modo de wave
 
 As configuracoes ficam como propriedades exportadas no no `Main` de `Main.tscn`, em `scripts/main.gd`:
 
 ```gdscript
-wave_enemy_counts = [5, 7, 8, 10, 12]
+min_spawn_interval = 8.0
+max_spawn_interval = 10.0
+enemies_per_group = 4
+group_enemy_spacing = 100.0
+wave_enemy_counts = [12, 15, 18, 21, 24]
 wave_element_options = ["Agua", "Terra", "Fogo", "Ar", "Fogo,Agua,Terra,Ar"]
+enemy_health_per_wave = 5
+wave_enemy_count_per_cycle = 3
 ```
 
-As waves sao:
+As cinco regioes e suas configuracoes iniciais sao:
 
-1. **Floresta de Agua**: 5 inimigos de Agua.
-2. **Montanha de Terra**: 7 inimigos de Terra.
-3. **Vulcao de Fogo**: 8 inimigos de Fogo.
-4. **Templo do Ar**: 10 inimigos de Ar.
-5. **Santuario do Equilibrio**: 12 inimigos, escolhidos entre os quatro elementos a cada spawn.
+1. **Floresta de Agua**: 12 inimigos de Agua.
+2. **Montanha de Terra**: 15 inimigos de Terra.
+3. **Vulcao de Fogo**: 18 inimigos de Fogo.
+4. **Templo do Ar**: 21 inimigos de Ar.
+5. **Santuario do Equilibrio**: 24 inimigos, escolhidos entre os quatro elementos a cada spawn.
 
-Uma wave so termina quando todos os inimigos previstos foram gerados e derrotados, e nao existem inimigos de debug vivos. A proxima fase so inicia pelo botao `Proxima fase`.
+O botao `Modo: Progredir` avanca automaticamente para a proxima wave quando todos os inimigos foram gerados e derrotados. Ao fim da quinta regiao, o jogo continua na primeira regiao, com dificuldade maior. O botao alterna para `Modo: Farmar`, que repete a wave atual ao termina-la; pode ser alternado durante uma wave. Nao ha tela de fase concluida ou de vitoria, entao o combate continua ate o Avatar ser derrotado.
 
-O mapa e trocado por `apply_map()` e usa um fade curto durante a transicao. A Wave 5 termina com a tela de vitoria; nao existe Wave 6.
+Os inimigos aparecem simultaneamente em grupos de ate 4, em fila horizontal, com 100 pixels entre cada um para evitar que se sobreponham. A pausa entre grupos e de 8-10 segundos. Assim, a primeira wave de 12 inimigos chega em tres grupos distintos. A cada wave, a vida base do inimigo aumenta em 5; em cada volta completa pelas cinco regioes, cada wave tambem recebe mais 3 inimigos. O mapa e trocado por `apply_map()` e usa um fade curto durante a transicao.
 
 ## Repetir a fase atual
 
-O botao `Tentar novamente` do Game Over chama `retry_current_wave()`:
+O botao `Tentar novamente` da derrota chama `retry_current_wave()`:
 
 - Mantem a wave em que o Avatar morreu.
 - Limpa inimigos, projeteis e efeitos da tentativa anterior.
@@ -125,9 +132,14 @@ O `Main` substitui `element` quando cria inimigos de uma wave.
 
 ### Spawn e esteira
 
-No no `Main`:
+No No no `Main`:
 
-- `min_spawn_interval` e `max_spawn_interval`: faixa dos intervalos aleatorios.
+- `min_spawn_interval` e `max_spawn_interval`: faixa da pausa entre grupos.
+- `enemies_per_group`: quantidade maxima de inimigos por grupo.
+- `group_enemy_spacing`: distancia entre inimigos enfileirados no mesmo grupo.
+- `wave_enemy_counts`: quantidade inicial de inimigos por regiao.
+- `enemy_health_per_wave`: aumento da vida base por wave.
+- `wave_enemy_count_per_cycle`: aumento de inimigos por wave a cada volta completa pelas regioes.
 - `belt_speed`: velocidade visual da esteira, inicialmente `56.0`.
 - A velocidade base dos inimigos esta em `Enemy.tscn` como `48.0`.
 
@@ -147,6 +159,7 @@ A tecla `P` abre a loja e pausa a simulacao. O painel de debug possui controles 
 - `1`, `2`, `3`, `4`: selecionar Fogo, Agua, Terra e Ar quando liberados.
 - `E`: coletar essencia proxima.
 - `Q`: consumir tres essencias e ativar bonus manual.
+- Botao `Modo: Progredir` / `Modo: Farmar`: escolher entre avancar ou repetir a wave atual.
 - `P`: abrir/fechar loja.
 - `Esc`: fechar loja.
 - `F1`: abrir/fechar painel de debug.
@@ -156,9 +169,8 @@ O painel de debug permite pausar, alternar `1x`, `2x` e `3x`, gerar inimigo, tes
 ## Telas e fluxo
 
 - `show_start_screen()`: tela inicial e botao `Iniciar jornada`.
-- `show_wave_complete()`: mostra regiao concluida e proxima regiao.
-- `handle_defeat()`: mostra Game Over e `Tentar novamente`.
-- `show_final_victory()`: encerra a campanha e oferece `Jogar novamente`.
+- `check_wave_completion()`: inicia a proxima wave ou repete a atual conforme o modo escolhido.
+- `handle_defeat()`: mostra a derrota e `Tentar novamente`.
 - `build_hud()` e `update_hud()`: constroem e atualizam a HUD de combate.
 
 Todas as telas reutilizam `defeat_overlay`, mantendo a interface simples e consistente.

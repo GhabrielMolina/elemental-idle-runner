@@ -45,6 +45,7 @@ var damage_bonus := false
 var element_xp: Dictionary[String, int] = {"Fogo": 0, "Agua": 0, "Terra": 0, "Ar": 0}
 var upgrade_levels: Dictionary[String, int] = {}
 @onready var sprite: Sprite2D = $Sprite
+@onready var health_bar: ProgressBar = $HealthBar
 var base_sprite_scale := Vector2.ONE
 var attack_tween: Tween
 var damage_tween: Tween
@@ -52,6 +53,8 @@ var damage_tween: Tween
 func _ready() -> void:
 	health = max_health
 	base_sprite_scale = sprite.scale
+	setup_health_bar()
+	update_health_bar()
 	queue_redraw()
 
 func _process(delta: float) -> void:
@@ -242,6 +245,7 @@ func take_damage(amount: int) -> void:
 		return
 	health = maxi(0, health - amount)
 	play_damage_feedback()
+	update_health_bar()
 	health_changed.emit(health, max_health)
 	queue_redraw()
 	if health == 0:
@@ -267,6 +271,30 @@ func play_damage_feedback() -> void:
 	damage_tween = create_tween()
 	damage_tween.tween_property(sprite, "modulate", Color.WHITE, 0.16)
 
+func setup_health_bar() -> void:
+	health_bar.max_value = max_health
+	var background := StyleBoxFlat.new()
+	background.bg_color = Color("#17242b")
+	background.corner_radius_top_left = 3
+	background.corner_radius_top_right = 3
+	background.corner_radius_bottom_left = 3
+	background.corner_radius_bottom_right = 3
+	health_bar.add_theme_stylebox_override("background", background)
+	var fill := StyleBoxFlat.new()
+	fill.corner_radius_top_left = 3
+	fill.corner_radius_top_right = 3
+	fill.corner_radius_bottom_left = 3
+	fill.corner_radius_bottom_right = 3
+	health_bar.add_theme_stylebox_override("fill", fill)
+
+func update_health_bar() -> void:
+	health_bar.value = health
+	var fill := health_bar.get_theme_stylebox("fill") as StyleBoxFlat
+	if fill == null:
+		return
+	var health_ratio := float(health) / float(max_health)
+	fill.bg_color = Color("#68c17d") if health_ratio > 0.5 else (Color("#e5bd58") if health_ratio > 0.25 else Color("#df6255"))
+
 func reset() -> void:
 	health = max_health
 	selected_element = "Fogo"
@@ -275,9 +303,9 @@ func reset() -> void:
 	water_timer = 0.0
 	earth_timer = 0.0
 	damage_bonus = false
+	update_health_bar()
 	sprite.scale = base_sprite_scale
 	sprite.rotation = 0.0
 	sprite.modulate = Color.WHITE
 	health_changed.emit(health, max_health)
 	queue_redraw()
-

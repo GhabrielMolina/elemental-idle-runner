@@ -28,6 +28,7 @@ var last_damage_element := ""
 # Definido pelo Main: devolve o multiplicador de dano recebido (Ressonancia, Rachadura).
 var damage_modifier: Callable
 @onready var sprite: Sprite2D = $Sprite
+@onready var health_bar: ProgressBar = $HealthBar
 var base_sprite_scale := Vector2.ONE
 var damage_tween: Tween
 var death_tween: Tween
@@ -37,6 +38,8 @@ func _ready() -> void:
 	base_speed = speed
 	base_sprite_scale = sprite.scale
 	apply_element_color()
+	setup_health_bar()
+	update_health_bar()
 	queue_redraw()
 
 func _process(delta: float) -> void:
@@ -79,6 +82,7 @@ func receive_damage(amount: int, source_element := "", push_distance := 0.0) -> 
 	if source_element != "":
 		last_damage_element = source_element
 	health = maxi(0, health - final_amount)
+	update_health_bar()
 	play_damage_feedback()
 	if push_distance != 0.0:
 		position.x = minf(position.x + push_distance, 920.0)
@@ -175,6 +179,30 @@ func apply_element_color() -> void:
 		"Ar": color = Color("#a6dfe8")
 	sprite.self_modulate = color
 
+func setup_health_bar() -> void:
+	health_bar.max_value = max_health
+	var background := StyleBoxFlat.new()
+	background.bg_color = Color("#17242b")
+	background.corner_radius_top_left = 2
+	background.corner_radius_top_right = 2
+	background.corner_radius_bottom_left = 2
+	background.corner_radius_bottom_right = 2
+	health_bar.add_theme_stylebox_override("background", background)
+	var fill := StyleBoxFlat.new()
+	fill.corner_radius_top_left = 2
+	fill.corner_radius_top_right = 2
+	fill.corner_radius_bottom_left = 2
+	fill.corner_radius_bottom_right = 2
+	health_bar.add_theme_stylebox_override("fill", fill)
+
+func update_health_bar() -> void:
+	health_bar.value = health
+	var fill := health_bar.get_theme_stylebox("fill") as StyleBoxFlat
+	if fill == null:
+		return
+	var health_ratio := float(health) / float(max_health)
+	fill.bg_color = Color("#68c17d") if health_ratio > 0.5 else (Color("#e5bd58") if health_ratio > 0.25 else Color("#df6255"))
+
 func play_damage_feedback() -> void:
 	if damage_tween and damage_tween.is_valid():
 		damage_tween.kill()
@@ -192,6 +220,7 @@ func die(killed_by_attack := false) -> void:
 		return
 	already_defeated = true
 	set_process(false)
+	health_bar.visible = false
 	clear_statuses()
 	queue_redraw()
 	if damage_tween and damage_tween.is_valid():

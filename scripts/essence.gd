@@ -5,4 +5,3 @@ extends Node2D
 func _process(delta: float) -> void:
 	position.x -= speed * delta
 	queue_redraw()
-

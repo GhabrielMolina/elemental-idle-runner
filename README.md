@@ -162,3 +162,29 @@ O painel de debug permite pausar, alternar `1x`, `2x` e `3x`, gerar inimigo, tes
 - `build_hud()` e `update_hud()`: constroem e atualizam a HUD de combate.
 
 Todas as telas reutilizam `defeat_overlay`, mantendo a interface simples e consistente.
+
+## Animacoes e feedback visual
+
+O Avatar e os inimigos usam um ciclo procedural de caminhada em seus scripts. As pernas visuais `LegLeft` e `LegRight` alternam a rotacao enquanto o personagem esta ativo. O sprite tambem recebe uma oscilacao pequena, sem alterar a posicao logica usada pelo combate.
+
+A prioridade visual e: morte, dano, ataque, caminhada e parado. Tweens anteriores sao encerrados antes de iniciar uma reacao concorrente. Dano interrompe ataque/caminhada temporariamente; ao terminar, o personagem retorna ao ciclo. Inimigos atordoados param a caminhada e inimigos mortos interrompem o processamento antes do fade de morte.
+
+- Avatar: `play_attack_feedback()` e `play_damage_feedback()` em `scripts/player.gd`.
+- Inimigo: `play_damage_feedback()` e `die()` em `scripts/enemy.gd`.
+- Membros visuais: `LegLeft` e `LegRight` em `Player.tscn` e `Enemy.tscn`.
+
+## HUD atual
+
+A HUD principal e construida em `build_hud()` de `scripts/main.gd`:
+
+- Superior esquerdo: nivel, XP, wave, regiao e barra de progresso da fase.
+- Superior direito: contador compacto de essencias e botao `P Loja`.
+- Parte inferior: quatro botoes compactos com icones SVG e teclas `1` a `4`; o botao selecionado recebe escala e destaque.
+- Dica contextual: `E Coletar`, `Q Bonus` e `F1 Debug`; E e Q ganham destaque quando podem ser usados.
+- Bonus: painel visual temporario, exibido somente enquanto o bonus estiver ativo.
+
+A vida do Avatar foi removida da HUD principal porque continua visivel na `HealthBar` flutuante de `Player.tscn`. Os textos de recarga tambem nao sao adicionados visualmente; os timers continuam funcionando em `player.gd`.
+
+A HUD nao possui um painel permanente separado para o elemento selecionado: a selecao e indicada diretamente pelo botao elemental correspondente.
+
+Os icones elementais ficam em `assets/elements/` e sao associados pela constante `ELEMENT_TEXTURES` de `main.gd`. Para trocar um icone, substitua o SVG mantendo o mesmo caminho ou atualize essa constante.

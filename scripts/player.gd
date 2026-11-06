@@ -46,13 +46,21 @@ var element_xp: Dictionary[String, int] = {"Fogo": 0, "Agua": 0, "Terra": 0, "Ar
 var upgrade_levels: Dictionary[String, int] = {}
 @onready var sprite: Sprite2D = $Sprite
 @onready var health_bar: ProgressBar = $HealthBar
+@onready var leg_left: Line2D = $LegLeft
+@onready var leg_right: Line2D = $LegRight
 var base_sprite_scale := Vector2.ONE
+var base_sprite_position := Vector2.ZERO
 var attack_tween: Tween
 var damage_tween: Tween
+var walk_phase := 0.0
+var attack_active := false
+var damage_active := false
+var dead := false
 
 func _ready() -> void:
 	health = max_health
 	base_sprite_scale = sprite.scale
+	base_sprite_position = sprite.position
 	setup_health_bar()
 	update_health_bar()
 	queue_redraw()
@@ -62,6 +70,13 @@ func _process(delta: float) -> void:
 	air_timer = maxf(0.0, air_timer - delta)
 	water_timer = maxf(0.0, water_timer - delta)
 	earth_timer = maxf(0.0, earth_timer - delta)
+	if not attack_active and not damage_active and not dead:
+		walk_phase = fmod(walk_phase + delta * 8.0, TAU)
+		var stride := sin(walk_phase)
+		sprite.position = base_sprite_position + Vector2(0, absf(stride) * 1.2)
+		sprite.rotation = stride * 0.018
+		leg_left.rotation = stride * 0.22
+		leg_right.rotation = -stride * 0.22
 
 func select_element(element: String) -> void:
 	if element == "Fogo" or element == "Agua" or element == "Terra" or element == "Ar":
@@ -249,27 +264,62 @@ func take_damage(amount: int) -> void:
 	health_changed.emit(health, max_health)
 	queue_redraw()
 	if health == 0:
+		dead = true
+		set_process(false)
+		if damage_tween and damage_tween.is_valid():
+			damage_tween.kill()
+		damage_active = false
+		sprite.position = base_sprite_position
+		sprite.rotation = 0.0
 		died.emit()
 
 func play_attack_feedback() -> void:
 	if attack_tween and attack_tween.is_valid():
 		attack_tween.kill()
+	attack_active = true
+	damage_active = false
 	sprite.scale = base_sprite_scale
+	sprite.position = base_sprite_position
 	var tilt := -0.06 if selected_element == "Ar" else 0.06
 	attack_tween = create_tween()
 	attack_tween.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	attack_tween.tween_property(sprite, "scale", base_sprite_scale * 1.08, 0.07)
 	attack_tween.parallel().tween_property(sprite, "rotation", tilt, 0.07)
+	attack_tween.parallel().tween_property(sprite, "position", base_sprite_position + Vector2(4, -1), 0.07)
 	attack_tween.set_ease(Tween.EASE_IN)
 	attack_tween.tween_property(sprite, "scale", base_sprite_scale, 0.12)
 	attack_tween.parallel().tween_property(sprite, "rotation", 0.0, 0.12)
+	attack_tween.parallel().tween_property(sprite, "position", base_sprite_position, 0.12)
+	attack_tween.tween_callback(finish_attack_feedback)
+
+func finish_attack_feedback() -> void:
+	attack_active = false
+	sprite.position = base_sprite_position
+	sprite.rotation = 0.0
 
 func play_damage_feedback() -> void:
 	if damage_tween and damage_tween.is_valid():
 		damage_tween.kill()
+	if attack_tween and attack_tween.is_valid():
+		attack_tween.kill()
+	attack_active = false
+	damage_active = true
 	sprite.modulate = Color("#ff9b8f")
+	sprite.position = base_sprite_position
 	damage_tween = create_tween()
+	damage_tween.set_parallel()
+	damage_tween.tween_property(sprite, "position", base_sprite_position + Vector2(-4, 0), 0.06)
+	damage_tween.tween_property(sprite, "rotation", -0.08, 0.06)
+	damage_tween.set_parallel(false)
 	damage_tween.tween_property(sprite, "modulate", Color.WHITE, 0.16)
+	damage_tween.parallel().tween_property(sprite, "position", base_sprite_position, 0.16)
+	damage_tween.parallel().tween_property(sprite, "rotation", 0.0, 0.16)
+	damage_tween.tween_callback(finish_damage_feedback)
+
+func finish_damage_feedback() -> void:
+	damage_active = false
+	sprite.position = base_sprite_position
+	sprite.rotation = 0.0
 
 func setup_health_bar() -> void:
 	health_bar.max_value = max_health
@@ -303,9 +353,15 @@ func reset() -> void:
 	water_timer = 0.0
 	earth_timer = 0.0
 	damage_bonus = false
+	dead = false
+	set_process(true)
+	walk_phase = 0.0
 	update_health_bar()
 	sprite.scale = base_sprite_scale
+	sprite.position = base_sprite_position
 	sprite.rotation = 0.0
 	sprite.modulate = Color.WHITE
+	leg_left.rotation = 0.0
+	leg_right.rotation = 0.0
 	health_changed.emit(health, max_health)
 	queue_redraw()

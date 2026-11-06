@@ -10,6 +10,18 @@ script = ExtResource("1_enemy")
 texture = ExtResource("2_enemy_sprite")
 position = Vector2(0, -36)
 scale = Vector2(0.65, 0.65)
+
+[node name="LegLeft" type="Line2D" parent="."]
+z_index = 1
+points = PackedVector2Array(-10, -5, -13, 2)
+width = 4.0
+default_color = Color(0.18, 0.12, 0.2, 1)
+
+[node name="LegRight" type="Line2D" parent="."]
+z_index = 1
+points = PackedVector2Array(10, -5, 13, 2)
+width = 4.0
+default_color = Color(0.18, 0.12, 0.2, 1)
 [node name="HealthBar" type="ProgressBar" parent="."]
 offset_left = -27.0
 offset_top = -100.0

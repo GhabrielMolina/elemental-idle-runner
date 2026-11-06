@@ -24,6 +24,12 @@ const MAP_GROUNDS := {
 }
 const REGION_NAMES := ["Floresta de Agua", "Montanha de Terra", "Vulcao de Fogo", "Templo do Ar", "Santuario do Equilibrio"]
 const MAP_KEYS := ["water", "earth", "fire", "air", "equilibrium"]
+const ELEMENT_TEXTURES := {
+	"Fogo": preload("res://assets/elements/fire.svg"),
+	"Agua": preload("res://assets/elements/water.svg"),
+	"Terra": preload("res://assets/elements/earth.svg"),
+	"Ar": preload("res://assets/elements/air.svg")
+}
 
 @onready var player: Node2D = $Player
 @onready var background: Sprite2D = $Background
@@ -68,6 +74,7 @@ var element_xp_label: Label
 var stats_label: Label
 var wave_label: Label
 var region_label: Label
+var wave_progress: ProgressBar
 var element_label: Label
 var cooldown_label: Label
 var bonus_label: Label
@@ -84,6 +91,16 @@ var hud_layer: CanvasLayer
 var ground_tiles: Array[Sprite2D] = []
 var transition_rect: ColorRect
 var transition_tween: Tween
+var essence_label: Label
+var essence_counter: PanelContainer
+var bonus_indicator: PanelContainer
+var shop_button: Button
+var interaction_label: Label
+var last_selected_element := ""
+var last_essence_count := 0
+var last_bonus_active := false
+var essence_tween: Tween
+var selection_tween: Tween
 var element_buttons: Array[Button] = []
 
 func _ready() -> void:
@@ -99,7 +116,9 @@ func _ready() -> void:
 	debug_panel.setup(self)
 	shop_panel = SHOP_SCENE.instantiate()
 	hud_layer.add_child(shop_panel)
+	shop_panel.process_mode = Node.PROCESS_MODE_ALWAYS
 	shop_panel.setup(self, player)
+	shop_button.pressed.connect(shop_panel.open)
 	player.health_changed.connect(update_health)
 	player.died.connect(handle_defeat)
 	player.leveled_up.connect(show_level_up_message)
@@ -144,9 +163,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		select_element("Terra")
 	elif event.keycode == KEY_4 and campaign_started and not game_over and not final_victory:
 		select_element("Ar")
-	elif event.keycode == KEY_E and not game_over:
+	elif event.keycode == KEY_E and campaign_started and not game_over and not final_victory:
 		collect_nearby_essence()
-	elif event.keycode == KEY_Q and not game_over:
+	elif event.keycode == KEY_Q and campaign_started and not game_over and not final_victory:
 		activate_bonus()
 	update_hud()
 
@@ -653,18 +672,21 @@ func build_hud() -> void:
 	hud_layer = canvas
 	var top_bar := PanelContainer.new()
 	top_bar.position = Vector2(18, 16)
-	top_bar.size = Vector2(550, 205)
+	top_bar.size = Vector2(360, 132)
+	apply_hud_panel_style(top_bar, Color("#162d42", 0.88), Color("#5c8f93"))
 	canvas.add_child(top_bar)
 	var column := VBoxContainer.new()
 	column.add_theme_constant_override("separation", 3)
 	top_bar.add_child(column)
 	health_label = Label.new()
 	health_label.text = "Vida"
+	health_label.visible = false
 	column.add_child(health_label)
 	health_bar = ProgressBar.new()
 	health_bar.max_value = player.max_health
 	health_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	health_bar.show_percentage = false
+	health_bar.visible = false
 	column.add_child(health_bar)
 	level_label = Label.new()
 	column.add_child(level_label)
@@ -676,30 +698,94 @@ func build_hud() -> void:
 	xp_bar.add_theme_stylebox_override("fill", xp_fill)
 	column.add_child(xp_bar)
 	element_xp_label = Label.new()
+	element_xp_label.visible = false
 	column.add_child(element_xp_label)
 	wave_label = Label.new()
 	column.add_child(wave_label)
+	wave_progress = ProgressBar.new()
+	wave_progress.custom_minimum_size = Vector2(0, 8)
+	wave_progress.show_percentage = false
+	var wave_fill := StyleBoxFlat.new()
+	wave_fill.bg_color = Color("#4bbbd8")
+	wave_progress.add_theme_stylebox_override("fill", wave_fill)
+	column.add_child(wave_progress)
 	region_label = Label.new()
 	column.add_child(region_label)
 	stats_label = Label.new()
+	stats_label.visible = false
 	column.add_child(stats_label)
 	element_label = Label.new()
+	element_label.visible = false
 	column.add_child(element_label)
 	cooldown_label = Label.new()
+	cooldown_label.visible = false
 	column.add_child(cooldown_label)
 	bonus_label = Label.new()
+	bonus_label.visible = false
 	column.add_child(bonus_label)
 	command_label = Label.new()
+	command_label.visible = false
 	command_label.add_theme_color_override("font_color", Color("#a7a39a"))
 	column.add_child(command_label)
 	advantage_label = Label.new()
+	advantage_label.visible = false
 	advantage_label.text = get_advantage_text()
 	advantage_label.add_theme_color_override("font_color", Color("#a7a39a"))
 	column.add_child(advantage_label)
-	element_buttons.append(create_element_button(canvas, "1  Fogo", "Fogo", Vector2(590, 24)))
-	element_buttons.append(create_element_button(canvas, "2  Agua", "Agua", Vector2(725, 24)))
-	element_buttons.append(create_element_button(canvas, "3  Terra", "Terra", Vector2(590, 66)))
-	element_buttons.append(create_element_button(canvas, "4  Ar", "Ar", Vector2(725, 66)))
+	element_buttons.append(create_element_button(canvas, "1", "Fogo", Vector2(300, 482)))
+	element_buttons.append(create_element_button(canvas, "2", "Agua", Vector2(390, 482)))
+	element_buttons.append(create_element_button(canvas, "3", "Terra", Vector2(480, 482)))
+	element_buttons.append(create_element_button(canvas, "4", "Ar", Vector2(570, 482)))
+	var element_bar := PanelContainer.new()
+	element_bar.position = Vector2(280, 474)
+	element_bar.size = Vector2(430, 58)
+	element_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	apply_hud_panel_style(element_bar, Color("#162d42", 0.78), Color("#5c8f93"))
+	canvas.add_child(element_bar)
+	element_bar.move_to_front()
+	for button in element_buttons:
+		button.move_to_front()
+	interaction_label = Label.new()
+	interaction_label.position = Vector2(18, 150)
+	interaction_label.add_theme_color_override("font_color", Color("#d9e8df"))
+	interaction_label.add_theme_color_override("font_outline_color", Color("#162d42"))
+	interaction_label.add_theme_constant_override("outline_size", 3)
+	canvas.add_child(interaction_label)
+	shop_button = Button.new()
+	shop_button.text = "P  Loja"
+	shop_button.position = Vector2(690, 18)
+	shop_button.size = Vector2(88, 42)
+	shop_button.pivot_offset = shop_button.size / 2.0
+	shop_button.tooltip_text = "Abrir loja de melhorias"
+	canvas.add_child(shop_button)
+	var essence_panel := PanelContainer.new()
+	essence_panel.position = Vector2(790, 18)
+	essence_panel.custom_minimum_size = Vector2(150, 58)
+	apply_hud_panel_style(essence_panel, Color("#162d42", 0.88), Color("#f3c969"))
+	canvas.add_child(essence_panel)
+	var essence_row := HBoxContainer.new()
+	essence_row.add_theme_constant_override("separation", 8)
+	essence_panel.add_child(essence_row)
+	var essence_icon := TextureRect.new()
+	essence_icon.texture = preload("res://assets/items/essence.svg")
+	essence_icon.custom_minimum_size = Vector2(38, 38)
+	essence_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	essence_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	essence_row.add_child(essence_icon)
+	essence_label = Label.new()
+	essence_label.add_theme_font_size_override("font_size", 20)
+	essence_row.add_child(essence_label)
+	essence_counter = essence_panel
+	bonus_indicator = PanelContainer.new()
+	bonus_indicator.position = Vector2(790, 82)
+	bonus_indicator.custom_minimum_size = Vector2(150, 38)
+	bonus_indicator.visible = false
+	apply_hud_panel_style(bonus_indicator, Color("#714936", 0.9), Color("#f3c969"))
+	canvas.add_child(bonus_indicator)
+	var bonus_indicator_label := Label.new()
+	bonus_indicator_label.text = "BONUS DE DANO"
+	bonus_indicator_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	bonus_indicator.add_child(bonus_indicator_label)
 	level_up_label = Label.new()
 	level_up_label.position = Vector2(590, 112)
 	level_up_label.add_theme_font_size_override("font_size", 20)
@@ -746,11 +832,23 @@ func build_hud() -> void:
 	transition_rect.z_index = 100
 	canvas.add_child(transition_rect)
 
+func apply_hud_panel_style(panel: PanelContainer, background_color: Color, border_color: Color) -> void:
+	var style := StyleBoxFlat.new()
+	style.bg_color = background_color
+	style.border_color = border_color
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(7)
+	panel.add_theme_stylebox_override("panel", style)
+
 func create_element_button(canvas: CanvasLayer, label: String, element: String, button_position: Vector2) -> Button:
 	var button := Button.new()
 	button.text = label
+	button.icon = ELEMENT_TEXTURES[element]
+	button.expand_icon = true
 	button.position = button_position
-	button.size = Vector2(125, 36)
+	button.size = Vector2(78, 48)
+	button.pivot_offset = button.size / 2.0
+	button.tooltip_text = element
 	button.pressed.connect(select_element.bind(element))
 	canvas.add_child(button)
 	return button
@@ -777,21 +875,77 @@ func update_hud() -> void:
 	element_xp_label.text = "XP elemental   Fogo %d   Agua %d   Terra %d   Ar %d" % [player.get_element_xp("Fogo"), player.get_element_xp("Agua"), player.get_element_xp("Terra"), player.get_element_xp("Ar")]
 	wave_label.text = "Wave %d/5   Progresso: %d/%d" % [current_wave + 1, wave_defeated_count, get_current_wave_total()]
 	region_label.text = REGION_NAMES[current_wave].to_upper()
+	wave_progress.max_value = maxi(1, get_current_wave_total())
+	wave_progress.value = wave_defeated_count
 	stats_label.text = "Inimigos derrotados: %d   Essencias: %d / 3" % [defeated_count, essence_count]
-	element_label.text = "Elemento ativo: %s" % player.selected_element
-	var cooldown: float = player.get_cooldown_remaining(player.selected_element)
-	cooldown_label.text = "Recarga: Pronto" if cooldown <= 0.0 else "Recarga: %.1f s" % cooldown
-	bonus_label.text = "Bonus de dano: ATIVO (%.1fs)" % bonus_timer if player.damage_bonus else "Bonus de dano: inativo"
-	command_label.text = "1-4 elemento   E coletar   Q consumir 3   P loja   F1 debug"
+	if player.selected_element != last_selected_element:
+		last_selected_element = player.selected_element
+		animate_selection_feedback()
+	essence_label.text = str(essence_count)
+	if essence_count != last_essence_count:
+		last_essence_count = essence_count
+		animate_essence_feedback()
+	bonus_indicator.visible = player.damage_bonus
+	if player.damage_bonus and not last_bonus_active:
+		animate_bonus_feedback()
+	last_bonus_active = player.damage_bonus
+	shop_button.disabled = not campaign_started or game_over or final_victory
 	var elements := ["Fogo", "Agua", "Terra", "Ar"]
-	var labels := ["1  Fogo", "2  Agua", "3  Terra", "4  Ar"]
+	var labels := ["1", "2", "3", "4"]
 	for index in element_buttons.size():
 		var unlocked: bool = player.is_element_unlocked(elements[index])
-		var lock_text := "" if unlocked else " (Nv%d)" % player.get_element_unlock_level(elements[index])
-		element_buttons[index].text = ("* " if elements[index] == player.selected_element else "") + labels[index] + lock_text
+		var lock_text := "" if unlocked else "\nNv. %d" % player.get_element_unlock_level(elements[index])
+		element_buttons[index].text = labels[index] + lock_text
 		element_buttons[index].disabled = not unlocked
+		element_buttons[index].scale = Vector2(1.08, 1.08) if elements[index] == player.selected_element else Vector2.ONE
+		element_buttons[index].modulate = Color("#fff1b0") if elements[index] == player.selected_element else (Color("#8b9696") if not unlocked else Color.WHITE)
+	interaction_label.text = get_interaction_hint()
 	if is_instance_valid(shop_panel) and shop_panel.visible:
 		shop_panel.refresh()
+
+func animate_selection_feedback() -> void:
+	if selection_tween and selection_tween.is_valid():
+		selection_tween.kill()
+	var element_index := ["Fogo", "Agua", "Terra", "Ar"].find(player.selected_element)
+	if element_index < 0 or element_index >= element_buttons.size():
+		return
+	var selected_button := element_buttons[element_index]
+	selection_tween = selected_button.create_tween()
+	selection_tween.tween_property(selected_button, "scale", Vector2(1.16, 1.16), 0.1)
+	selection_tween.tween_property(selected_button, "scale", Vector2(1.08, 1.08), 0.16)
+
+func get_interaction_hint() -> String:
+	var hints := PackedStringArray()
+	if has_nearby_essence():
+		hints.append("[E] Coletar essencia")
+	else:
+		hints.append("E coletar")
+	if essence_count >= 3 and not player.damage_bonus:
+		hints.append("[Q] Bonus pronto")
+	else:
+		hints.append("Q bonus")
+	hints.append("F1 debug")
+	return "   |   ".join(hints)
+
+func has_nearby_essence() -> bool:
+	for essence in get_tree().get_nodes_in_group("essences"):
+		if is_instance_valid(essence) and player.global_position.distance_to(essence.global_position) <= 70.0:
+			return true
+	return false
+
+func animate_essence_feedback() -> void:
+	if essence_tween and essence_tween.is_valid():
+		essence_tween.kill()
+	essence_counter.scale = Vector2.ONE
+	essence_tween = essence_counter.create_tween()
+	essence_tween.tween_property(essence_counter, "scale", Vector2(1.12, 1.12), 0.1)
+	essence_tween.tween_property(essence_counter, "scale", Vector2.ONE, 0.16)
+
+func animate_bonus_feedback() -> void:
+	bonus_indicator.scale = Vector2.ONE
+	var tween := bonus_indicator.create_tween()
+	tween.tween_property(bonus_indicator, "scale", Vector2(1.08, 1.08), 0.12)
+	tween.tween_property(bonus_indicator, "scale", Vector2.ONE, 0.18)
 
 func get_advantage_text() -> String:
 	var parts := PackedStringArray()

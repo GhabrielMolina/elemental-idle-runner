@@ -29,14 +29,20 @@ var last_damage_element := ""
 var damage_modifier: Callable
 @onready var sprite: Sprite2D = $Sprite
 @onready var health_bar: ProgressBar = $HealthBar
+@onready var leg_left: Line2D = $LegLeft
+@onready var leg_right: Line2D = $LegRight
 var base_sprite_scale := Vector2.ONE
+var base_sprite_position := Vector2.ZERO
 var damage_tween: Tween
 var death_tween: Tween
+var walk_phase := 0.0
+var damage_active := false
 
 func _ready() -> void:
 	health = max_health
 	base_speed = speed
 	base_sprite_scale = sprite.scale
+	base_sprite_position = sprite.position
 	apply_element_color()
 	setup_health_bar()
 	update_health_bar()
@@ -55,7 +61,15 @@ func _process(delta: float) -> void:
 	process_damage_over_time(delta)
 	queue_redraw()
 	if already_defeated or stun_timer > 0.0:
+		reset_walk_visual()
 		return
+	if not damage_active:
+		walk_phase = fmod(walk_phase + delta * 7.0, TAU)
+		var stride := sin(walk_phase)
+		sprite.position = base_sprite_position + Vector2(0, absf(stride) * 0.9)
+		sprite.rotation = stride * 0.015
+		leg_left.rotation = stride * 0.2
+		leg_right.rotation = -stride * 0.2
 	position.x -= base_speed * get_speed_multiplier() * delta
 
 func process_damage_over_time(delta: float) -> void:
@@ -206,14 +220,33 @@ func update_health_bar() -> void:
 func play_damage_feedback() -> void:
 	if damage_tween and damage_tween.is_valid():
 		damage_tween.kill()
+	damage_active = true
+	reset_walk_visual()
 	sprite.scale = base_sprite_scale
 	sprite.modulate = Color("#fff1c2")
 	damage_tween = create_tween()
+	damage_tween.set_parallel()
+	damage_tween.tween_property(sprite, "position", base_sprite_position + Vector2(-3, 0), 0.05)
+	damage_tween.tween_property(sprite, "rotation", -0.07, 0.05)
+	damage_tween.set_parallel(false)
 	damage_tween.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	damage_tween.tween_property(sprite, "scale", base_sprite_scale * 1.06, 0.05)
 	damage_tween.set_ease(Tween.EASE_IN)
 	damage_tween.tween_property(sprite, "scale", base_sprite_scale, 0.1)
 	damage_tween.parallel().tween_property(sprite, "modulate", Color.WHITE, 0.12)
+	damage_tween.parallel().tween_property(sprite, "position", base_sprite_position, 0.12)
+	damage_tween.parallel().tween_property(sprite, "rotation", 0.0, 0.12)
+	damage_tween.tween_callback(finish_damage_feedback)
+
+func finish_damage_feedback() -> void:
+	damage_active = false
+	reset_walk_visual()
+
+func reset_walk_visual() -> void:
+	sprite.position = base_sprite_position
+	sprite.rotation = 0.0
+	leg_left.rotation = 0.0
+	leg_right.rotation = 0.0
 
 func die(killed_by_attack := false) -> void:
 	if already_defeated:
@@ -225,6 +258,7 @@ func die(killed_by_attack := false) -> void:
 	queue_redraw()
 	if damage_tween and damage_tween.is_valid():
 		damage_tween.kill()
+	damage_active = false
 	defeated.emit(killed_by_attack, last_damage_element if killed_by_attack else "")
 	death_tween = create_tween()
 	death_tween.set_parallel()

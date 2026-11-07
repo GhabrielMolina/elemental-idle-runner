@@ -30,6 +30,13 @@ const ELEMENT_TEXTURES := {
 	"Terra": preload("res://assets/elements/earth.svg"),
 	"Ar": preload("res://assets/elements/air.svg")
 }
+const SAVE_PATH := "user://progress.cfg"
+const MENU_ART := preload("res://assets/ui/menu_art.svg")
+const SHOP_ICON := preload("res://assets/ui/shop.svg")
+const LEVEL_ICON := preload("res://assets/ui/level.svg")
+const WAVE_ICON := preload("res://assets/ui/wave.svg")
+const CYCLE_ICON := preload("res://assets/ui/cycle.svg")
+const HELP_ICON := preload("res://assets/ui/help.svg")
 
 @onready var player: Node2D = $Player
 @onready var background: Sprite2D = $Background
@@ -41,7 +48,7 @@ const ELEMENT_TEXTURES := {
 @export var belt_speed: float = 56.0
 @export var wave_enemy_counts: Array[int] = [12, 15, 18, 21, 24]
 @export var wave_element_options: Array[String] = ["Agua", "Terra", "Fogo", "Ar", "Fogo,Agua,Terra,Ar"]
-@export var enemy_health_per_wave: int = 5
+@export var enemy_health_per_wave: int = 50
 @export var wave_enemy_count_per_cycle: int = 3
 @export var min_xp_per_kill := 13
 @export var max_xp_per_kill := 20
@@ -55,6 +62,7 @@ var defeated_count := 0
 var essence_count := 0
 var game_over := false
 var campaign_started := false
+var showing_instructions := false
 var current_wave := 0
 var selected_start_wave := 0
 var unlocked_phase_count := 1
@@ -92,6 +100,9 @@ var overlay_stats: Label
 var phase_selector_label: Label
 var phase_selector: OptionButton
 var overlay_button: Button
+var overlay_secondary_button: Button
+var overlay_art: TextureRect
+var overlay_scroll: ScrollContainer
 var debug_panel: PanelContainer
 var shop_panel: PanelContainer
 var hud_layer: CanvasLayer
@@ -120,7 +131,10 @@ func _ready() -> void:
 	build_hud()
 	debug_panel = DEBUG_SCENE.instantiate()
 	add_child(debug_panel)
-	debug_panel.position = Vector2(700, 160)
+	debug_panel.position = Vector2(682, 8)
+	debug_panel.custom_minimum_size = Vector2(270, 524)
+	debug_panel.size = Vector2(270, 524)
+	debug_panel.clip_contents = true
 	debug_panel.z_index = 50
 	debug_panel.setup(self)
 	shop_panel = SHOP_SCENE.instantiate()
@@ -131,6 +145,7 @@ func _ready() -> void:
 	player.health_changed.connect(update_health)
 	player.died.connect(handle_defeat)
 	player.leveled_up.connect(show_level_up_message)
+	player.xp_changed.connect(func(_xp: int, _level: int) -> void: save_progress())
 	player.set_process(false)
 	apply_map(0)
 	show_start_screen()
@@ -241,12 +256,14 @@ func start_wave(wave_index: int, save_wave_resources := true) -> void:
 	apply_map(current_wave)
 	play_map_transition()
 	defeat_overlay.visible = false
+	save_progress()
 	update_hud()
 
 func select_start_wave(wave_index: int) -> void:
 	if wave_index < 0 or wave_index >= unlocked_phase_count:
 		return
 	selected_start_wave = wave_index
+	save_progress()
 	if not campaign_started or game_over:
 		return
 	for entity in get_tree().get_nodes_in_group("runtime_entity"):
@@ -279,26 +296,56 @@ func play_map_transition() -> void:
 func show_start_screen() -> void:
 	campaign_started = false
 	game_over = false
+	showing_instructions = false
 	player.set_process(false)
 	defeat_overlay.visible = true
+	defeat_overlay.position = Vector2(280, 70)
+	defeat_overlay.custom_minimum_size = Vector2(400, 400)
+	defeat_overlay.size = Vector2(400, 400)
+	overlay_scroll.custom_minimum_size = Vector2(350, 42)
+	overlay_art.visible = true
 	defeat_label.text = "Elemental Idle Runner"
 	overlay_message.text = "Quatro elementos. Um unico proposito."
-	overlay_stats.text = "Escolha uma regiao para iniciar.\n1-4 escolhem elementos | E coleta | Q usa essencias"
-	overlay_button.text = "Iniciar jornada"
+	overlay_stats.text = "Escolha uma regiao para iniciar.\n1-4 elementos | E coleta | Q bonus | P loja"
+	overlay_button.text = "Jogar"
+	overlay_secondary_button.visible = true
+	overlay_secondary_button.text = "Instrucoes"
 	selected_start_wave = mini(selected_start_wave, unlocked_phase_count - 1)
 	phase_selector.select(selected_start_wave)
+	update_hud()
+
+func show_instructions() -> void:
+	showing_instructions = true
+	defeat_overlay.visible = true
+	defeat_overlay.position = Vector2(280, 18)
+	defeat_overlay.custom_minimum_size = Vector2(400, 504)
+	defeat_overlay.size = Vector2(400, 504)
+	overlay_scroll.custom_minimum_size = Vector2(350, 240)
+	overlay_art.visible = false
+	defeat_label.text = "Instrucoes"
+	overlay_message.text = "COMBATE\nO Avatar ataca automaticamente quando ha um alvo.\nUse 1-4 para escolher Fogo, Agua, Terra ou Ar.\n\nRECURSOS\nPressione E perto de uma essencia. Com 3 essencias, use Q para ativar o bonus por 5 segundos.\n\nPROGRESSAO\nProgredir avanca pelas fases. Farmar repete a fase selecionada para ganhar XP e comprar melhorias.\n\nCONTROLES\nP abre a loja | Esc fecha menus | F1 abre o debug"
+	overlay_stats.text = "Fases desbloqueadas: %d/5" % unlocked_phase_count
+	overlay_button.text = "Voltar"
+	overlay_secondary_button.visible = false
+
+func handle_secondary_overlay_action() -> void:
+	show_instructions()
 
 func begin_campaign() -> void:
 	get_tree().paused = false
 	Engine.time_scale = 1.0
 	speed_index = 0
+	var saved_element: String = player.selected_element
 	player.reset()
-	essence_count = 0
+	if player.is_element_unlocked(saved_element):
+		player.selected_element = saved_element
 	bonus_timer = 0.0
 	game_over = false
 	campaign_started = true
+	overlay_art.visible = false
 	player.set_process(true)
 	start_wave(selected_start_wave)
+	save_progress()
 	update_debug()
 
 func retry_current_wave() -> void:
@@ -308,7 +355,10 @@ func retry_current_wave() -> void:
 	for entity in get_tree().get_nodes_in_group("runtime_entity"):
 		if is_instance_valid(entity):
 			entity.queue_free()
+	var saved_element: String = player.selected_element
 	player.reset()
+	if player.is_element_unlocked(saved_element):
+		player.selected_element = saved_element
 	essence_count = wave_start_essence_count
 	bonus_timer = 0.0
 	air_attack_counter = 0
@@ -343,22 +393,56 @@ func check_wave_completion() -> void:
 
 func load_progress() -> void:
 	var progress := ConfigFile.new()
-	var error := progress.load("user://progress.cfg")
+	var error := progress.load(SAVE_PATH)
 	if error == ERR_FILE_NOT_FOUND:
 		return
 	if error != OK:
 		push_error("Nao foi possivel carregar o progresso: %s" % error_string(error))
 		return
 	var saved_count: Variant = progress.get_value("campaign", "unlocked_phase_count", 1)
-	if typeof(saved_count) != TYPE_INT:
-		push_error("Progresso invalido: unlocked_phase_count deve ser um inteiro.")
-		return
-	unlocked_phase_count = clampi(int(saved_count), 1, REGION_NAMES.size())
+	if typeof(saved_count) == TYPE_INT:
+		unlocked_phase_count = clampi(int(saved_count), 1, REGION_NAMES.size())
+	var saved_wave: Variant = progress.get_value("campaign", "current_wave", 0)
+	if typeof(saved_wave) == TYPE_INT:
+		current_wave = maxi(0, int(saved_wave))
+	var saved_selected: Variant = progress.get_value("campaign", "selected_start_wave", 0)
+	if typeof(saved_selected) == TYPE_INT:
+		selected_start_wave = clampi(int(saved_selected), 0, unlocked_phase_count - 1)
+	farm_current_wave = bool(progress.get_value("campaign", "farm_current_wave", false))
+	essence_count = maxi(0, int(progress.get_value("resources", "essence_count", 0)))
+	var saved_xp: Variant = progress.get_value("player", "xp", 0)
+	var saved_level: Variant = progress.get_value("player", "level", 1)
+	if typeof(saved_xp) == TYPE_INT:
+		player.xp = maxi(0, int(saved_xp))
+	if typeof(saved_level) == TYPE_INT:
+		player.level = clampi(int(saved_level), 1, player.get_max_level())
+	var saved_element: String = str(progress.get_value("player", "selected_element", "Fogo"))
+	if player.is_element_unlocked(saved_element):
+		player.selected_element = saved_element
+	var saved_element_xp: Variant = progress.get_value("player", "element_xp", {})
+	if saved_element_xp is Dictionary:
+		for element in player.element_xp:
+			player.element_xp[element] = maxi(0, int(saved_element_xp.get(element, 0)))
+	var saved_upgrades: Variant = progress.get_value("player", "upgrade_levels", {})
+	if saved_upgrades is Dictionary:
+		player.upgrade_levels.clear()
+		for upgrade_id in saved_upgrades:
+			player.upgrade_levels[str(upgrade_id)] = maxi(0, int(saved_upgrades[upgrade_id]))
+	player.update_health_bar()
 
 func save_progress() -> void:
 	var progress := ConfigFile.new()
 	progress.set_value("campaign", "unlocked_phase_count", unlocked_phase_count)
-	var error := progress.save("user://progress.cfg")
+	progress.set_value("campaign", "current_wave", current_wave)
+	progress.set_value("campaign", "selected_start_wave", selected_start_wave)
+	progress.set_value("campaign", "farm_current_wave", farm_current_wave)
+	progress.set_value("player", "xp", player.xp)
+	progress.set_value("player", "level", player.level)
+	progress.set_value("player", "selected_element", player.selected_element)
+	progress.set_value("player", "element_xp", player.element_xp)
+	progress.set_value("player", "upgrade_levels", player.upgrade_levels)
+	progress.set_value("resources", "essence_count", essence_count)
+	var error := progress.save(SAVE_PATH)
 	if error != OK:
 		push_error("Nao foi possivel salvar o progresso: %s" % error_string(error))
 
@@ -375,10 +459,13 @@ func refresh_phase_selector() -> void:
 
 func toggle_wave_mode() -> void:
 	farm_current_wave = not farm_current_wave
+	save_progress()
 	update_hud()
 
 func handle_overlay_action() -> void:
-	if not campaign_started:
+	if showing_instructions:
+		show_start_screen()
+	elif not campaign_started:
 		begin_campaign()
 	elif game_over:
 		retry_current_wave()
@@ -396,17 +483,50 @@ func debug_add_xp() -> void:
 func debug_add_element_xp() -> void:
 	for element in ["Fogo", "Agua", "Terra", "Ar"]:
 		player.add_element_xp(element, 100)
+	save_progress()
 	update_hud()
 
 func debug_reset_progress() -> void:
+	reset_all_progress()
+
+func reset_all_progress() -> void:
+	get_tree().paused = false
+	Engine.time_scale = 1.0
+	if is_instance_valid(shop_panel):
+		shop_panel.close()
+	if is_instance_valid(debug_panel):
+		debug_panel.visible = false
+	for entity in get_tree().get_nodes_in_group("runtime_entity"):
+		if is_instance_valid(entity):
+			entity.queue_free()
 	player.reset_progress()
+	player.reset()
+	unlocked_phase_count = 1
+	selected_start_wave = 0
+	current_wave = 0
+	farm_current_wave = false
+	wave_spawned_count = 0
+	wave_defeated_count = 0
+	wave_start_essence_count = 0
+	defeated_count = 0
+	essence_count = 0
+	bonus_timer = 0.0
+	enemy_health_override = 0
 	air_attack_counter = 0
+	campaign_started = false
+	game_over = false
+	show_start_screen()
+	refresh_phase_selector()
+	var save_absolute_path := ProjectSettings.globalize_path(SAVE_PATH)
+	if FileAccess.file_exists(SAVE_PATH):
+		DirAccess.remove_absolute(save_absolute_path)
+	save_progress()
 	update_hud()
 
 func get_enemy_max_health() -> int:
 	if enemy_health_override > 0:
 		return enemy_health_override
-	return default_enemy_health + current_wave * maxi(0, enemy_health_per_wave)
+	return maxi(1, enemy_health_per_wave * (current_wave + 1))
 
 # Vale para os proximos inimigos e ajusta os vivos mantendo a proporcao da vida atual.
 func debug_set_enemy_health(value: float) -> void:
@@ -610,6 +730,7 @@ func collect_nearby_essence() -> void:
 	if closest != null:
 		closest.queue_free()
 		essence_count += 1
+		save_progress()
 		update_hud()
 
 func activate_bonus() -> void:
@@ -618,6 +739,7 @@ func activate_bonus() -> void:
 	essence_count -= 3
 	player.damage_bonus = true
 	bonus_timer = 5.0
+	save_progress()
 	update_hud()
 
 func _on_enemy_defeated(killed_by_attack: bool, killer_element: String, enemy: Node2D, counts_for_wave: bool) -> void:
@@ -735,7 +857,10 @@ func build_hud() -> void:
 	health_bar.visible = false
 	column.add_child(health_bar)
 	level_label = Label.new()
-	column.add_child(level_label)
+	var level_row := HBoxContainer.new()
+	level_row.add_child(create_ui_icon(LEVEL_ICON, 22))
+	level_row.add_child(level_label)
+	column.add_child(level_row)
 	xp_bar = ProgressBar.new()
 	xp_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	xp_bar.show_percentage = false
@@ -747,7 +872,10 @@ func build_hud() -> void:
 	element_xp_label.visible = false
 	column.add_child(element_xp_label)
 	wave_label = Label.new()
-	column.add_child(wave_label)
+	var wave_row := HBoxContainer.new()
+	wave_row.add_child(create_ui_icon(WAVE_ICON, 22))
+	wave_row.add_child(wave_label)
+	column.add_child(wave_row)
 	wave_progress = ProgressBar.new()
 	wave_progress.custom_minimum_size = Vector2(0, 8)
 	wave_progress.show_percentage = false
@@ -756,7 +884,10 @@ func build_hud() -> void:
 	wave_progress.add_theme_stylebox_override("fill", wave_fill)
 	column.add_child(wave_progress)
 	region_label = Label.new()
-	column.add_child(region_label)
+	var region_row := HBoxContainer.new()
+	region_row.add_child(create_ui_icon(CYCLE_ICON, 18))
+	region_row.add_child(region_label)
+	column.add_child(region_row)
 	stats_label = Label.new()
 	stats_label.visible = false
 	column.add_child(stats_label)
@@ -815,6 +946,8 @@ func build_hud() -> void:
 	canvas.add_child(interaction_label)
 	shop_button = Button.new()
 	shop_button.text = "P  Loja"
+	shop_button.icon = SHOP_ICON
+	shop_button.expand_icon = true
 	shop_button.position = Vector2(690, 18)
 	shop_button.size = Vector2(88, 42)
 	shop_button.pivot_offset = shop_button.size / 2.0
@@ -864,8 +997,10 @@ func build_hud() -> void:
 	canvas.add_child(level_up_label)
 	defeat_overlay = PanelContainer.new()
 	defeat_overlay.process_mode = Node.PROCESS_MODE_ALWAYS
-	defeat_overlay.position = Vector2(280, 125)
-	defeat_overlay.custom_minimum_size = Vector2(400, 290)
+	defeat_overlay.position = Vector2(280, 18)
+	defeat_overlay.custom_minimum_size = Vector2(400, 504)
+	defeat_overlay.size = Vector2(400, 504)
+	defeat_overlay.clip_contents = true
 	canvas.add_child(defeat_overlay)
 	var overlay_margin := MarginContainer.new()
 	overlay_margin.add_theme_constant_override("margin_left", 22)
@@ -881,9 +1016,22 @@ func build_hud() -> void:
 	defeat_label.add_theme_font_size_override("font_size", 26)
 	defeat_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	defeat_column.add_child(defeat_label)
+	overlay_art = TextureRect.new()
+	overlay_art.texture = MENU_ART
+	overlay_art.custom_minimum_size = Vector2(320, 133)
+	overlay_art.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	overlay_art.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	defeat_column.add_child(overlay_art)
+	overlay_scroll = ScrollContainer.new()
+	overlay_scroll.custom_minimum_size = Vector2(0, 190)
+	overlay_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	defeat_column.add_child(overlay_scroll)
 	overlay_message = Label.new()
+	overlay_message.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	overlay_message.custom_minimum_size = Vector2(350, 0)
+	overlay_message.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	overlay_message.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	defeat_column.add_child(overlay_message)
+	overlay_scroll.add_child(overlay_message)
 	overlay_stats = Label.new()
 	overlay_stats.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	defeat_column.add_child(overlay_stats)
@@ -891,6 +1039,12 @@ func build_hud() -> void:
 	overlay_button.custom_minimum_size = Vector2(0, 38)
 	overlay_button.pressed.connect(handle_overlay_action)
 	defeat_column.add_child(overlay_button)
+	overlay_secondary_button = Button.new()
+	overlay_secondary_button.icon = HELP_ICON
+	overlay_secondary_button.expand_icon = true
+	overlay_secondary_button.custom_minimum_size = Vector2(0, 34)
+	overlay_secondary_button.pressed.connect(handle_secondary_overlay_action)
+	defeat_column.add_child(overlay_secondary_button)
 	defeat_overlay.visible = false
 	transition_rect = ColorRect.new()
 	transition_rect.position = Vector2.ZERO
@@ -899,6 +1053,15 @@ func build_hud() -> void:
 	transition_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	transition_rect.z_index = 100
 	canvas.add_child(transition_rect)
+
+func create_ui_icon(texture: Texture2D, size: int) -> TextureRect:
+	var icon := TextureRect.new()
+	icon.texture = texture
+	icon.custom_minimum_size = Vector2(size, size)
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return icon
 
 func apply_hud_panel_style(panel: PanelContainer, background_color: Color, border_color: Color) -> void:
 	var style := StyleBoxFlat.new()
@@ -1040,7 +1203,9 @@ func get_level_text() -> String:
 func update_debug() -> void:
 	if is_instance_valid(debug_panel):
 		var state := "derrota" if game_over else ("pausado" if get_tree().paused else "em andamento")
-		debug_panel.update_display(state, speeds[speed_index], get_tree().paused)
+		var cycle := floori(float(current_wave) / REGION_NAMES.size()) + 1
+		var progress_text := "Fase %d/5 | Ciclo %d | Vida inimigo %d" % [posmod(current_wave, REGION_NAMES.size()) + 1, cycle, get_enemy_max_health()]
+		debug_panel.update_display(state, speeds[speed_index], get_tree().paused, progress_text)
 
 func _draw() -> void:
 	for x in range(-80, 1040, 80):

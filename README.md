@@ -59,7 +59,7 @@ enemies_per_group = 4
 group_enemy_spacing = 100.0
 wave_enemy_counts = [12, 15, 18, 21, 24]
 wave_element_options = ["Agua", "Terra", "Fogo", "Ar", "Fogo,Agua,Terra,Ar"]
-enemy_health_per_wave = 5
+enemy_health_per_wave = 50
 wave_enemy_count_per_cycle = 3
 ```
 
@@ -200,3 +200,47 @@ A vida do Avatar foi removida da HUD principal porque continua visivel na `Healt
 A HUD nao possui um painel permanente separado para o elemento selecionado: a selecao e indicada diretamente pelo botao elemental correspondente.
 
 Os icones elementais ficam em `assets/elements/` e sao associados pela constante `ELEMENT_TEXTURES` de `main.gd`. Para trocar um icone, substitua o SVG mantendo o mesmo caminho ou atualize essa constante.
+
+## Persistencia e novo jogo
+
+O progresso permanente e salvo em `user://progress.cfg` usando `ConfigFile`. O arquivo nao fica dentro de `res://`.
+
+Sao persistidos:
+
+- Fase atual e fase selecionada.
+- Fases desbloqueadas.
+- Modo Progredir ou Farmar.
+- XP, nivel e elemento selecionado.
+- XP elemental e melhorias compradas.
+- Quantidade de essencias persistentes.
+
+O carregamento acontece no `_ready()` de `scripts/main.gd`, antes da tela inicial. O botao `Jogar` usa a fase selecionada e os dados carregados; ele nao reinicia automaticamente na Wave 1 quando existe progresso.
+
+O botao `Zerar progresso` do painel de debug abre uma confirmacao. Ao confirmar, `reset_all_progress()` remove `user://progress.cfg`, restaura a campanha, XP, nivel, melhorias, recursos, modo e fase inicial, salva um estado novo e retorna ao menu. Configuracoes do projeto, como resolucao, nao sao alteradas.
+
+## Ciclos e vida dos inimigos
+
+As waves usam grupos de ate quatro inimigos, com `enemies_per_group`, `group_enemy_spacing` e os intervalos `min_spawn_interval`/`max_spawn_interval` configurados no `Main`.
+
+A vida e calculada em `get_enemy_max_health()`:
+
+```gdscript
+vida = enemy_health_per_wave * (current_wave + 1)
+```
+
+Com `enemy_health_per_wave = 50`, a primeira passagem usa 50, 100, 150, 200 e 250 HP. Depois da quinta regiao, `current_wave` continua aumentando e a vida segue 300, 350, 400 e assim por diante. Inimigos criados pelo debug usam a mesma formula da fase atual, salvo quando o campo de teste de vida e usado explicitamente.
+
+O painel de debug mostra fase, ciclo e vida efetiva dos inimigos.
+
+## Menu e instrucoes
+
+O menu inicial e criado em `build_hud()` e usa `assets/ui/menu_art.svg`. Ele apresenta `Jogar` e `Instrucoes`. A tela de instrucoes reutiliza o overlay central e descreve combate, essencias, bonus, progressao, loja e controles reais.
+
+Os novos icones de interface ficam em `assets/ui/`:
+
+- `menu_art.svg`: arte principal do menu.
+- `level.svg`, `wave.svg` e `cycle.svg`: simbolos de progressao.
+- `shop.svg`: icone da loja.
+- `help.svg`: icone reservado para ajuda.
+
+O botao `P Loja` abre a loja existente, e `Esc` ou `P` fecha. A loja opera em `PROCESS_MODE_ALWAYS` para continuar interativa enquanto a simulacao esta pausada.

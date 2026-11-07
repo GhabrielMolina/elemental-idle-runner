@@ -3,24 +3,33 @@ extends PanelContainer
 var main_controller: Node
 var state_label: Label
 var speed_label: Label
+var progress_label: Label
 var pause_button: Button
 var speed_button: Button
+var reset_confirmation: ConfirmationDialog
 
 func setup(controller: Node) -> void:
 	main_controller = controller
 	build_interface()
 
 func build_interface() -> void:
-	custom_minimum_size = Vector2(250, 0)
+	custom_minimum_size = Vector2(270, 524)
+	size = Vector2(270, 524)
+	clip_contents = true
 	var margin := MarginContainer.new()
 	margin.add_theme_constant_override("margin_left", 12)
 	margin.add_theme_constant_override("margin_right", 12)
 	margin.add_theme_constant_override("margin_top", 10)
 	margin.add_theme_constant_override("margin_bottom", 10)
 	add_child(margin)
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(246, 500)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	margin.add_child(scroll)
 	var column := VBoxContainer.new()
 	column.add_theme_constant_override("separation", 7)
-	margin.add_child(column)
+	column.custom_minimum_size.x = 240
+	scroll.add_child(column)
 	var title := Label.new()
 	title.text = "PAINEL DE DEBUG"
 	title.add_theme_color_override("font_color", Color("#f3c969"))
@@ -29,6 +38,8 @@ func build_interface() -> void:
 	column.add_child(state_label)
 	speed_label = Label.new()
 	column.add_child(speed_label)
+	progress_label = Label.new()
+	column.add_child(progress_label)
 	pause_button = Button.new()
 	pause_button.custom_minimum_size = Vector2(220, 34)
 	pause_button.pressed.connect(main_controller.toggle_pause)
@@ -69,7 +80,15 @@ func build_interface() -> void:
 	column.add_child(add_element_xp_button)
 	var reset_progress_button := Button.new()
 	reset_progress_button.text = "Zerar progresso"
-	reset_progress_button.pressed.connect(main_controller.debug_reset_progress)
+	reset_confirmation = ConfirmationDialog.new()
+	reset_confirmation.title = "Zerar todo o progresso?"
+	reset_confirmation.dialog_text = "Essa acao apagará niveis, XP, recursos, compras e fases desbloqueadas. O jogo voltara ao estado inicial."
+	reset_confirmation.ok_button_text = "Confirmar e zerar"
+	reset_confirmation.cancel_button_text = "Cancelar"
+	reset_confirmation.process_mode = Node.PROCESS_MODE_ALWAYS
+	reset_confirmation.confirmed.connect(main_controller.debug_reset_progress)
+	add_child(reset_confirmation)
+	reset_progress_button.pressed.connect(reset_confirmation.popup_centered)
 	column.add_child(reset_progress_button)
 	var reset_button := Button.new()
 	reset_button.text = "Reiniciar partida"
@@ -81,11 +100,12 @@ func build_interface() -> void:
 	column.add_child(hint)
 	visible = false
 
-func update_display(state: String, speed: float, is_paused: bool) -> void:
+func update_display(state: String, speed: float, is_paused: bool, progress_text := "") -> void:
 	if not is_instance_valid(state_label):
 		return
 	state_label.text = "Estado: " + state
 	speed_label.text = "Simulacao: " + str(int(speed)) + "×"
+	progress_label.text = progress_text
 	speed_button.text = "Velocidade: " + str(int(speed)) + "×"
 	pause_button.text = "Continuar" if is_paused else "Pausar"
 

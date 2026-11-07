@@ -107,6 +107,7 @@ func show_details(id: String) -> void:
 
 func _on_upgrade_pressed(id: String) -> void:
 	if player.purchase(id):
+		main_controller.save_progress()
 		main_controller.update_hud()
 		show_details(id)
 

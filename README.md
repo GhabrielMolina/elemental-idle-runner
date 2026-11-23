@@ -26,6 +26,7 @@ O seletor `Selecionar fase` fica sempre visivel na HUD. No inicio, apenas a Fase
 - `scenes/Essence.tscn`: essencia coletavel.
 - `scenes/DebugPanel.tscn`: controles de teste.
 - `scenes/ShopPanel.tscn`: loja de melhorias da sessao.
+- `scenes/TutorialPanel.tscn`: dicas do tutorial progressivo.
 - `scenes/Tornado.tscn` e `scenes/MudPatch.tscn`: efeitos visuais de melhorias.
 
 ### Scripts principais
@@ -37,6 +38,7 @@ O seletor `Selecionar fase` fica sempre visivel na HUD. No inicio, apenas a Fase
 - `scripts/essence.gd`: movimento da essencia.
 - `scripts/debug_panel.gd`: pausa, velocidade, spawn manual, XP e reinicio.
 - `scripts/shop_panel.gd` e `scripts/upgrade_catalog.gd`: loja e catalogo de melhorias.
+- `scripts/tutorial_panel.gd`: tutorial progressivo; revela a HUD aos poucos e mostra dicas que pausam o jogo.
 - `scripts/tornado.gd`, `scripts/mud_patch.gd` e `scripts/area_effect.gd`: efeitos especiais visuais.
 
 ### Assets
@@ -61,6 +63,7 @@ wave_enemy_counts = [12, 15, 18, 21, 24]
 wave_element_options = ["Agua", "Terra", "Fogo", "Ar", "Fogo,Agua,Terra,Ar"]
 enemy_health_per_wave = 50
 wave_enemy_count_per_cycle = 3
+tutorial_first_wave_enemy_count = 8
 ```
 
 As cinco regioes e suas configuracoes iniciais sao:
@@ -140,6 +143,7 @@ No No no `Main`:
 - `wave_enemy_counts`: quantidade inicial de inimigos por regiao.
 - `enemy_health_per_wave`: aumento da vida base por wave.
 - `wave_enemy_count_per_cycle`: aumento de inimigos por wave a cada volta completa pelas regioes.
+- `tutorial_first_wave_enemy_count`: inimigos da Wave 1 enquanto o tutorial esta ativo; `0` usa a quantidade normal.
 - `belt_speed`: velocidade visual da esteira, inicialmente `56.0`.
 - A velocidade base dos inimigos esta em `Enemy.tscn` como `48.0`.
 
@@ -164,7 +168,9 @@ A tecla `P` abre a loja e pausa a simulacao. O painel de debug possui controles 
 - `Esc`: fechar loja.
 - `F1`: abrir/fechar painel de debug.
 
-O painel de debug permite pausar, alternar `1x`, `2x` e `3x`, gerar inimigo, testar XP, ajustar vida dos inimigos e reiniciar a campanha na Wave 1.
+Durante o tutorial, `E` e `Q` so funcionam depois que as essencias aparecem (Wave 3) e `P` depois que a loja aparece.
+
+O painel de debug permite pausar, alternar `1x`, `2x` e `3x`, gerar inimigo, testar XP, ajustar vida dos inimigos, pular o tutorial e reiniciar a campanha na Wave 1.
 
 ## Telas e fluxo
 
@@ -197,9 +203,32 @@ A HUD principal e construida em `build_hud()` de `scripts/main.gd`:
 
 A vida do Avatar foi removida da HUD principal porque continua visivel na `HealthBar` flutuante de `Player.tscn`. Os textos de recarga tambem nao sao adicionados visualmente; os timers continuam funcionando em `player.gd`.
 
-A HUD nao possui um painel permanente separado para o elemento selecionado: a selecao e indicada diretamente pelo botao elemental correspondente.
+A HUD nao possui um painel permanente separado para o elemento selecionado: a selecao e indicada diretamente pelo botao elemental correspondente. `layout_element_bar()` centraliza os botoes visiveis e ajusta a largura da barra.
+
+Em um jogo novo, o tutorial progressivo esconde partes da HUD ate a Wave 4; veja a secao abaixo.
 
 Os icones elementais ficam em `assets/elements/` e sao associados pela constante `ELEMENT_TEXTURES` de `main.gd`. Para trocar um icone, substitua o SVG mantendo o mesmo caminho ou atualize essa constante.
+
+## Tutorial progressivo
+
+Um jogo novo comeca com a HUD vazia: so o botao de Fogo. Cada parte aparece junto com uma dica que pausa o jogo; o controle novo pulsa enquanto a dica esta aberta. A logica fica em `scripts/tutorial_panel.gd`, e o `main.gd` consulta `is_hud_feature_visible()` para montar a HUD.
+
+| Momento | O que aparece |
+|---|---|
+| Inicio da Wave 1 | So o botao de Fogo; nao surgem essencias. Dica de boas-vindas. A Wave 1 tem 8 inimigos em vez de 12. |
+| Elemento liberado por nivel | O botao do elemento, com dica de tecla, efeito e vantagem elemental. |
+| Inicio da Wave 2 | Painel de nivel, XP, wave e regiao. |
+| Primeira derrota | Botao da loja e tecla `P`; a dica tem o botao `Abrir loja`. |
+| Inicio da Wave 3 | Essencias, contador e teclas `E`/`Q`. |
+| Inicio da Wave 4 | Botao de modo Progredir/Farmar e seletor de fase. O tutorial termina e a HUD fica completa. |
+
+- Se o jogador chegar a Wave 3 sem perder, a loja aparece no inicio dela.
+- Enquanto o tutorial estiver ativo, cada nova derrota faz o botao da loja pulsar se houver melhoria compravel.
+- Durante o tutorial, elementos bloqueados ficam escondidos; depois dele voltam a aparecer com `Nv. X`.
+- A dica nunca abre por cima da loja: abrir a loja fecha a dica atual, e as dicas pendentes aparecem quando a loja fecha.
+- Os textos ficam em `STEPS` e `ELEMENT_TIPS`; a vantagem citada nas dicas de elemento vem de `element_advantages` do `Player`.
+
+O botao `Pular tutorial` do painel de debug libera toda a HUD. `Zerar progresso` reinicia o tutorial.
 
 ## Persistencia e novo jogo
 
@@ -213,10 +242,13 @@ Sao persistidos:
 - XP, nivel e elemento selecionado.
 - XP elemental e melhorias compradas.
 - Quantidade de essencias persistentes.
+- Tutorial: partes da HUD reveladas, dicas ja vistas e conclusao.
+
+Um save criado antes do tutorial e que ja tem progresso (nivel, XP, fases ou melhorias) abre com o tutorial concluido.
 
 O carregamento acontece no `_ready()` de `scripts/main.gd`, antes da tela inicial. O botao `Jogar` usa a fase selecionada e os dados carregados; ele nao reinicia automaticamente na Wave 1 quando existe progresso.
 
-O botao `Zerar progresso` do painel de debug abre uma confirmacao. Ao confirmar, `reset_all_progress()` remove `user://progress.cfg`, restaura a campanha, XP, nivel, melhorias, recursos, modo e fase inicial, salva um estado novo e retorna ao menu. Configuracoes do projeto, como resolucao, nao sao alteradas.
+O botao `Zerar progresso` do painel de debug abre uma confirmacao. Ao confirmar, `reset_all_progress()` remove `user://progress.cfg`, restaura a campanha, XP, nivel, melhorias, recursos, modo, fase inicial e tutorial, salva um estado novo e retorna ao menu. Configuracoes do projeto, como resolucao, nao sao alteradas.
 
 ## Ciclos e vida dos inimigos
 

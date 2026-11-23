@@ -156,6 +156,12 @@ func can_purchase(id: String) -> bool:
 	var cost := get_upgrade_cost(id)
 	return cost > 0 and is_upgrade_unlocked(id) and get_upgrade_funds(id) >= cost
 
+func has_affordable_upgrade() -> bool:
+	for id in UpgradeCatalog.UPGRADES:
+		if can_purchase(id):
+			return true
+	return false
+
 func purchase(id: String) -> bool:
 	if not can_purchase(id):
 		return false

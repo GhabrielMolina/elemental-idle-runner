@@ -5,6 +5,7 @@ const PROJECTILE_SCENE := preload("res://scenes/Projectile.tscn")
 const ESSENCE_SCENE := preload("res://scenes/Essence.tscn")
 const DEBUG_SCENE := preload("res://scenes/DebugPanel.tscn")
 const SHOP_SCENE := preload("res://scenes/ShopPanel.tscn")
+const TUTORIAL_SCENE := preload("res://scenes/TutorialPanel.tscn")
 const TORNADO_SCENE := preload("res://scenes/Tornado.tscn")
 const MUD_PATCH_SCENE := preload("res://scenes/MudPatch.tscn")
 const AREA_EFFECT := preload("res://scripts/area_effect.gd")
@@ -50,6 +51,8 @@ const HELP_ICON := preload("res://assets/ui/help.svg")
 @export var wave_element_options: Array[String] = ["Agua", "Terra", "Fogo", "Ar", "Fogo,Agua,Terra,Ar"]
 @export var enemy_health_per_wave: int = 50
 @export var wave_enemy_count_per_cycle: int = 3
+# Inimigos da Wave 1 enquanto o tutorial esta ativo; 0 usa a quantidade normal.
+@export var tutorial_first_wave_enemy_count: int = 8
 @export var min_xp_per_kill := 13
 @export var max_xp_per_kill := 20
 
@@ -105,7 +108,11 @@ var overlay_art: TextureRect
 var overlay_scroll: ScrollContainer
 var debug_panel: PanelContainer
 var shop_panel: PanelContainer
+var tutorial_panel: PanelContainer
 var hud_layer: CanvasLayer
+var progress_panel: PanelContainer
+var element_bar: PanelContainer
+var visible_element_count := -1
 var ground_tiles: Array[Sprite2D] = []
 var transition_rect: ColorRect
 var transition_tween: Tween
@@ -124,6 +131,8 @@ var element_buttons: Array[Button] = []
 
 func _ready() -> void:
 	spawn_rng.randomize()
+	# Criado antes do load_progress() para receber o estado salvo; entra na HUD depois do build_hud().
+	tutorial_panel = TUTORIAL_SCENE.instantiate()
 	load_progress()
 	var enemy_probe := ENEMY_SCENE.instantiate()
 	default_enemy_health = enemy_probe.max_health
@@ -141,10 +150,13 @@ func _ready() -> void:
 	hud_layer.add_child(shop_panel)
 	shop_panel.process_mode = Node.PROCESS_MODE_ALWAYS
 	shop_panel.setup(self, player)
+	hud_layer.add_child(tutorial_panel)
+	tutorial_panel.setup(self)
 	shop_button.pressed.connect(shop_panel.open)
 	player.health_changed.connect(update_health)
 	player.died.connect(handle_defeat)
 	player.leveled_up.connect(show_level_up_message)
+	player.leveled_up.connect(tutorial_panel.on_level_up)
 	player.xp_changed.connect(func(_xp: int, _level: int) -> void: save_progress())
 	player.set_process(false)
 	apply_map(0)
@@ -166,7 +178,7 @@ func _process(delta: float) -> void:
 	if enemy_timer <= 0.0 and wave_spawned_count < get_current_wave_total():
 		spawn_enemy_group()
 		enemy_timer = get_next_spawn_interval()
-	if essence_timer <= 0.0:
+	if essence_timer <= 0.0 and is_hud_feature_visible("essencias"):
 		spawn_essence()
 		essence_timer = 6.0
 	move_entities_and_resolve_contacts()
@@ -186,9 +198,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		select_element("Terra")
 	elif event.keycode == KEY_4 and campaign_started and not game_over:
 		select_element("Ar")
-	elif event.keycode == KEY_E and campaign_started and not game_over:
+	elif event.keycode == KEY_E and campaign_started and not game_over and is_hud_feature_visible("essencias"):
 		collect_nearby_essence()
-	elif event.keycode == KEY_Q and campaign_started and not game_over:
+	elif event.keycode == KEY_Q and campaign_started and not game_over and is_hud_feature_visible("essencias"):
 		activate_bonus()
 	update_hud()
 
@@ -222,6 +234,8 @@ func get_next_spawn_interval() -> float:
 func get_current_wave_total() -> int:
 	if current_wave < 0 or wave_enemy_counts.is_empty():
 		return 0
+	if current_wave == 0 and tutorial_first_wave_enemy_count > 0 and is_tutorial_active():
+		return tutorial_first_wave_enemy_count
 	var config_index := posmod(current_wave, wave_enemy_counts.size())
 	var cycle := floori(float(current_wave) / wave_enemy_counts.size())
 	return maxi(0, wave_enemy_counts[config_index] + cycle * maxi(0, wave_enemy_count_per_cycle))
@@ -258,6 +272,7 @@ func start_wave(wave_index: int, save_wave_resources := true) -> void:
 	defeat_overlay.visible = false
 	save_progress()
 	update_hud()
+	tutorial_panel.on_wave_started(current_wave)
 
 func select_start_wave(wave_index: int) -> void:
 	if wave_index < 0 or wave_index >= unlocked_phase_count:
@@ -290,7 +305,8 @@ func play_map_transition() -> void:
 	if transition_tween and transition_tween.is_valid():
 		transition_tween.kill()
 	transition_rect.color.a = 1.0
-	transition_tween = create_tween()
+	# Continua mesmo pausado: uma dica do tutorial pode pausar o jogo logo no inicio da wave.
+	transition_tween = create_tween().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
 	transition_tween.tween_property(transition_rect, "color:a", 0.0, 0.35)
 
 func show_start_screen() -> void:
@@ -306,7 +322,10 @@ func show_start_screen() -> void:
 	overlay_art.visible = true
 	defeat_label.text = "Elemental Idle Runner"
 	overlay_message.text = "Quatro elementos. Um unico proposito."
-	overlay_stats.text = "Escolha uma regiao para iniciar.\n1-4 elementos | E coleta | Q bonus | P loja"
+	if is_hud_feature_visible("fases"):
+		overlay_stats.text = "Escolha uma regiao para iniciar.\n1-4 elementos | E coleta | Q bonus | P loja"
+	else:
+		overlay_stats.text = "Derrote os inimigos e domine os quatro elementos.\nRegiao: %s" % REGION_NAMES[selected_start_wave]
 	overlay_button.text = "Jogar"
 	overlay_secondary_button.visible = true
 	overlay_secondary_button.text = "Instrucoes"
@@ -366,6 +385,8 @@ func retry_current_wave() -> void:
 	player.set_process(true)
 	start_wave(current_wave, false)
 	update_debug()
+	# Depois do retry, que despausa o jogo; assim a dica da derrota pode pausar.
+	tutorial_panel.on_defeat()
 
 func has_active_enemies(group_name: String) -> bool:
 	for enemy in get_tree().get_nodes_in_group(group_name):
@@ -428,6 +449,11 @@ func load_progress() -> void:
 		player.upgrade_levels.clear()
 		for upgrade_id in saved_upgrades:
 			player.upgrade_levels[str(upgrade_id)] = maxi(0, int(saved_upgrades[upgrade_id]))
+	if progress.has_section("tutorial"):
+		tutorial_panel.read_save(progress)
+	elif player.level > 1 or player.xp > 0 or unlocked_phase_count > 1 or player.get_total_element_xp() > 0 or not player.upgrade_levels.is_empty():
+		# Save anterior ao tutorial: quem ja tinha progresso continua com a HUD completa.
+		tutorial_panel.complete()
 	player.update_health_bar()
 
 func save_progress() -> void:
@@ -442,6 +468,7 @@ func save_progress() -> void:
 	progress.set_value("player", "element_xp", player.element_xp)
 	progress.set_value("player", "upgrade_levels", player.upgrade_levels)
 	progress.set_value("resources", "essence_count", essence_count)
+	tutorial_panel.write_save(progress)
 	var error := progress.save(SAVE_PATH)
 	if error != OK:
 		push_error("Nao foi possivel salvar o progresso: %s" % error_string(error))
@@ -489,7 +516,16 @@ func debug_add_element_xp() -> void:
 func debug_reset_progress() -> void:
 	reset_all_progress()
 
+func debug_skip_tutorial() -> void:
+	tutorial_panel.complete()
+	save_progress()
+	if not campaign_started:
+		show_start_screen()
+	update_hud()
+
 func reset_all_progress() -> void:
+	# Antes de fechar a loja, para nenhuma dica pendente abrir no meio do reset.
+	tutorial_panel.reset_state()
 	get_tree().paused = false
 	Engine.time_scale = 1.0
 	if is_instance_valid(shop_panel):
@@ -823,7 +859,7 @@ func restart_game() -> void:
 	queue_redraw()
 
 func toggle_pause() -> void:
-	if game_over or shop_panel.visible:
+	if game_over or shop_panel.visible or tutorial_panel.is_showing():
 		return
 	get_tree().paused = not get_tree().paused
 	update_debug()
@@ -833,19 +869,63 @@ func cycle_speed() -> void:
 	Engine.time_scale = speeds[speed_index]
 	update_debug()
 
+func is_hud_feature_visible(feature: String) -> bool:
+	return tutorial_panel.is_revealed(feature)
+
+func is_tutorial_active() -> bool:
+	return tutorial_panel.is_active()
+
+func is_shop_open() -> bool:
+	return is_instance_valid(shop_panel) and shop_panel.visible
+
+func can_open_shop() -> bool:
+	return campaign_started and not game_over and is_hud_feature_visible("loja")
+
+func open_shop() -> void:
+	if can_open_shop() and not shop_panel.visible:
+		shop_panel.open()
+
+# Fecha a dica aberta antes de a loja guardar o estado de pausa.
+func before_shop_open() -> void:
+	tutorial_panel.close_message()
+
+func after_shop_close() -> void:
+	tutorial_panel.try_show_next()
+
+# Controles que pulsam quando o tutorial revela ou destaca uma parte da HUD.
+func get_tutorial_targets(key: String) -> Array[Control]:
+	var targets: Array[Control] = []
+	match key:
+		"progresso":
+			targets.append(progress_panel)
+		"loja":
+			targets.append(shop_button)
+		"essencias":
+			targets.append(essence_counter)
+			targets.append(interaction_label)
+		"modo":
+			targets.append(wave_mode_button)
+		"fases":
+			targets.append(phase_selector)
+		_:
+			var element_index := ["Fogo", "Agua", "Terra", "Ar"].find(key.trim_prefix("elemento_"))
+			if key.begins_with("elemento_") and element_index >= 0:
+				targets.append(element_buttons[element_index])
+	return targets
+
 func build_hud() -> void:
 	var canvas := CanvasLayer.new()
 	canvas.name = "HUD"
 	add_child(canvas)
 	hud_layer = canvas
-	var top_bar := PanelContainer.new()
-	top_bar.position = Vector2(18, 16)
-	top_bar.size = Vector2(360, 132)
-	apply_hud_panel_style(top_bar, Color("#162d42", 0.88), Color("#5c8f93"))
-	canvas.add_child(top_bar)
+	progress_panel = PanelContainer.new()
+	progress_panel.position = Vector2(18, 16)
+	progress_panel.size = Vector2(360, 132)
+	apply_hud_panel_style(progress_panel, Color("#162d42", 0.88), Color("#5c8f93"))
+	canvas.add_child(progress_panel)
 	var column := VBoxContainer.new()
 	column.add_theme_constant_override("separation", 3)
-	top_bar.add_child(column)
+	progress_panel.add_child(column)
 	health_label = Label.new()
 	health_label.text = "Vida"
 	health_label.visible = false
@@ -913,7 +993,7 @@ func build_hud() -> void:
 	element_buttons.append(create_element_button(canvas, "2", "Agua", Vector2(390, 482)))
 	element_buttons.append(create_element_button(canvas, "3", "Terra", Vector2(480, 482)))
 	element_buttons.append(create_element_button(canvas, "4", "Ar", Vector2(570, 482)))
-	var element_bar := PanelContainer.new()
+	element_bar = PanelContainer.new()
 	element_bar.position = Vector2(280, 474)
 	element_bar.size = Vector2(430, 58)
 	element_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -1123,6 +1203,14 @@ func update_hud() -> void:
 	shop_button.disabled = not campaign_started or game_over
 	wave_mode_button.text = "Modo: Farmar" if farm_current_wave else "Modo: Progredir"
 	wave_mode_button.disabled = not campaign_started or game_over
+	# O tutorial revela estas partes aos poucos; depois dele tudo fica visivel.
+	progress_panel.visible = is_hud_feature_visible("progresso")
+	shop_button.visible = is_hud_feature_visible("loja")
+	essence_counter.visible = is_hud_feature_visible("essencias")
+	interaction_label.visible = is_hud_feature_visible("essencias")
+	wave_mode_button.visible = is_hud_feature_visible("modo")
+	phase_selector.visible = is_hud_feature_visible("fases")
+	phase_selector_label.visible = phase_selector.visible
 	var elements := ["Fogo", "Agua", "Terra", "Ar"]
 	var labels := ["1", "2", "3", "4"]
 	for index in element_buttons.size():
@@ -1130,11 +1218,31 @@ func update_hud() -> void:
 		var lock_text := "" if unlocked else "\nNv. %d" % player.get_element_unlock_level(elements[index])
 		element_buttons[index].text = labels[index] + lock_text
 		element_buttons[index].disabled = not unlocked
+		element_buttons[index].visible = unlocked or not is_tutorial_active()
 		element_buttons[index].scale = Vector2(1.08, 1.08) if elements[index] == player.selected_element else Vector2.ONE
 		element_buttons[index].modulate = Color("#fff1b0") if elements[index] == player.selected_element else (Color("#8b9696") if not unlocked else Color.WHITE)
+	layout_element_bar()
 	interaction_label.text = get_interaction_hint()
 	if is_instance_valid(shop_panel) and shop_panel.visible:
 		shop_panel.refresh()
+
+# Centraliza os botoes elementais visiveis; durante o tutorial so aparecem os liberados.
+func layout_element_bar() -> void:
+	var visible_buttons: Array[Button] = []
+	for button in element_buttons:
+		if button.visible:
+			visible_buttons.append(button)
+	if visible_buttons.size() == visible_element_count:
+		return
+	visible_element_count = visible_buttons.size()
+	var spacing := 90.0
+	var row_width := visible_buttons.size() * spacing - (spacing - 78.0)
+	var start_x := 480.0 - row_width / 2.0
+	for index in visible_buttons.size():
+		visible_buttons[index].position = Vector2(start_x + index * spacing, 482)
+	element_bar.position = Vector2(start_x - 20.0, 474)
+	element_bar.size = Vector2(row_width + 40.0, 58)
+	element_bar.visible = not visible_buttons.is_empty()
 
 func animate_selection_feedback() -> void:
 	if selection_tween and selection_tween.is_valid():

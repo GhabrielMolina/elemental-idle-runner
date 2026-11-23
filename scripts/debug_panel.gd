@@ -78,6 +78,10 @@ func build_interface() -> void:
 	add_element_xp_button.text = "+100 XP elemental"
 	add_element_xp_button.pressed.connect(main_controller.debug_add_element_xp)
 	column.add_child(add_element_xp_button)
+	var skip_tutorial_button := Button.new()
+	skip_tutorial_button.text = "Pular tutorial"
+	skip_tutorial_button.pressed.connect(main_controller.debug_skip_tutorial)
+	column.add_child(skip_tutorial_button)
 	var reset_progress_button := Button.new()
 	reset_progress_button.text = "Zerar progresso"
 	reset_confirmation = ConfirmationDialog.new()

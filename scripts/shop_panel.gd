@@ -112,6 +112,7 @@ func _on_upgrade_pressed(id: String) -> void:
 		show_details(id)
 
 func open() -> void:
+	main_controller.before_shop_open()
 	was_paused = get_tree().paused
 	get_tree().paused = true
 	visible = true
@@ -126,6 +127,7 @@ func close() -> void:
 	get_tree().paused = was_paused
 	main_controller.update_hud()
 	main_controller.update_debug()
+	main_controller.after_shop_close()
 
 func _input(event: InputEvent) -> void:
 	if not event is InputEventKey or not event.pressed or event.echo:
@@ -134,7 +136,7 @@ func _input(event: InputEvent) -> void:
 		# Nao abrir a loja enquanto se digita em um campo (ex.: vida dos inimigos no debug).
 		if get_viewport().gui_get_focus_owner() is LineEdit:
 			return
-		if not visible and (not main_controller.campaign_started or main_controller.game_over):
+		if not visible and not main_controller.can_open_shop():
 			return
 		if visible:
 			close()
